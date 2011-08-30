@@ -1,119 +1,86 @@
-diff -rc xlogdump.orig/Makefile xlogdump/Makefile
-*** xlogdump.orig/Makefile	2011-08-30 08:16:28.000000000 +0900
---- xlogdump/Makefile	2011-08-30 08:37:06.000000000 +0900
-***************
-*** 1,7 ****
-  # $PostgreSQL: pgsql/contrib/pgbench/Makefile,v 1.14 2005/09/27 17:13:08 tgl Exp $
-  
-  PROGRAM = xlogdump
-! OBJS = xlogdump.o ../../src/port/sprompt.o ../../src/backend/utils/hash/pg_crc.o
-  DOCS = README.xlogdump
-  
-  PG_CPPFLAGS = -I$(libpq_srcdir)
---- 1,7 ----
-  # $PostgreSQL: pgsql/contrib/pgbench/Makefile,v 1.14 2005/09/27 17:13:08 tgl Exp $
-  
-  PROGRAM = xlogdump
-! OBJS = xlogdump.o $(top_builddir)/src/port/sprompt.o $(top_builddir)/src/backend/utils/hash/pg_crc.o
-  DOCS = README.xlogdump
-  
-  PG_CPPFLAGS = -I$(libpq_srcdir)
-diff -rc xlogdump.orig/xlogdump.c xlogdump/xlogdump.c
-*** xlogdump.orig/xlogdump.c	2011-08-30 08:16:28.000000000 +0900
---- xlogdump/xlogdump.c	2011-08-30 10:15:51.000000000 +0900
-***************
-*** 17,24 ****
-  #include "postgres.h"
-  
-  #include <fcntl.h>
-- #include <unistd.h>
-  #include <getopt_long.h>
-  
-  #include "access/clog.h"
-  #include "access/htup.h"
---- 17,25 ----
-  #include "postgres.h"
-  
-  #include <fcntl.h>
-  #include <getopt_long.h>
-+ #include <time.h>
-+ #include <unistd.h>
-  
-  #include "access/clog.h"
-  #include "access/htup.h"
-***************
-*** 29,36 ****
---- 30,39 ----
-  #include "access/xact.h"
-  #include "access/xlog_internal.h"
-  #include "catalog/pg_control.h"
-+ #include "utils/pg_crc.h"
-  
-  #include "libpq-fe.h"
-+ #include "pg_config.h"
-  #include "pqexpbuffer.h"
-  
-  #include "xlogdump.h"
-***************
-*** 300,306 ****
-  		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
-  		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
-  	{
-! 		printf("invalid record length(expected %lu ~ %lu, actual %d) at %X/%X\n",
-  				SizeOfXLogRecord + record->xl_len,
-  				SizeOfXLogRecord + record->xl_len +
-  					XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ),
---- 303,309 ----
-  		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
-  		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
-  	{
-! 		printf("invalid record length(expected %u ~ %u, actual %d) at %X/%X\n",
-  				SizeOfXLogRecord + record->xl_len,
-  				SizeOfXLogRecord + record->xl_len +
-  					XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ),
-***************
-*** 944,950 ****
---- 947,955 ----
-  				}
-  				break;
-  				case XLOG_HEAP2_CLEAN:
-+ #if PG_VERSION_NUM < 90000
-  				case XLOG_HEAP2_CLEAN_MOVE:
-+ #endif
-  				{
-  					xl_heap_clean xlrec;
-  					int total_off;
-***************
-*** 958,964 ****
---- 963,973 ----
-  					if (total_off > xlrec.nredirected + xlrec.ndead)
-  						nunused = total_off - (xlrec.nredirected + xlrec.ndead);
-  					printf("clean%s: ts %s db %s rel %s block %u redirected %d dead %d unused %d\n",
-+ #if PG_VERSION_NUM < 90000
-  						info == XLOG_HEAP2_CLEAN_MOVE ? "_move" : "",
-+ #else
-+ 						"",
-+ #endif
-  						spaceName, dbName, relName,
-  						xlrec.block,
-  						xlrec.nredirected, xlrec.ndead, nunused);
-***************
-*** 1045,1050 ****
---- 1054,1060 ----
-  						   ItemPointerGetOffsetNumber(&xlrec.newtid));
-  					break;
-  				}
-+ #if PG_VERSION_NUM < 90000
-  				case XLOG_HEAP_MOVE:
-  				{
-  					xl_heap_update xlrec;
-***************
-*** 1062,1067 ****
---- 1072,1078 ----
-  						   ItemPointerGetOffsetNumber(&xlrec.newtid));
-  					break;
-  				}
-+ #endif
-  				case XLOG_HEAP_NEWPAGE:
-  				{
-  					xl_heap_newpage xlrec;
+diff --git a/xlogdump/Makefile b/xlogdump/Makefile
+index 14abd72..1204fdf 100644
+--- a/xlogdump/Makefile
++++ b/xlogdump/Makefile
+@@ -1,7 +1,7 @@
+ # $PostgreSQL: pgsql/contrib/pgbench/Makefile,v 1.14 2005/09/27 17:13:08 tgl Exp $
+ 
+ PROGRAM = xlogdump
+-OBJS    = xlogdump.o ../../src/port/sprompt.o ../../src/backend/utils/hash/pg_crc.o
++OBJS    = xlogdump.o $(top_builddir)/src/port/sprompt.o $(top_builddir)/src/backend/utils/hash/pg_crc.o
+ 
+ PG_CPPFLAGS = -I$(libpq_srcdir)
+ PG_LIBS = $(libpq_pgport)
+diff --git a/xlogdump/xlogdump.c b/xlogdump/xlogdump.c
+index ac6fccd..7006180 100644
+--- a/xlogdump/xlogdump.c
++++ b/xlogdump/xlogdump.c
+@@ -17,8 +17,9 @@
+ #include "postgres.h"
+ 
+ #include <fcntl.h>
+-#include <unistd.h>
+ #include <getopt_long.h>
++#include <time.h>
++#include <unistd.h>
+ 
+ #include "access/clog.h"
+ #include "access/htup.h"
+@@ -29,8 +30,10 @@
+ #include "access/xact.h"
+ #include "access/xlog_internal.h"
+ #include "catalog/pg_control.h"
++#include "utils/pg_crc.h"
+ 
+ #include "libpq-fe.h"
++#include "pg_config.h"
+ #include "pqexpbuffer.h"
+ 
+ #include "xlogdump.h"
+@@ -300,7 +303,7 @@ restart:
+ 		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
+ 		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
+ 	{
+-		printf("invalid record length(expected %lu ~ %lu, actual %d) at %X/%X\n",
++		printf("invalid record length(expected %u ~ %u, actual %d) at %X/%X\n",
+ 				SizeOfXLogRecord + record->xl_len,
+ 				SizeOfXLogRecord + record->xl_len +
+ 					XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ),
+@@ -944,7 +947,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
+ 				}
+ 				break;
+ 				case XLOG_HEAP2_CLEAN:
++#if PG_VERSION_NUM < 90000
+ 				case XLOG_HEAP2_CLEAN_MOVE:
++#endif
+ 				{
+ 					xl_heap_clean xlrec;
+ 					int total_off;
+@@ -958,7 +963,11 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
+ 					if (total_off > xlrec.nredirected + xlrec.ndead)
+ 						nunused = total_off - (xlrec.nredirected + xlrec.ndead);
+ 					printf("clean%s: ts %s db %s rel %s block %u redirected %d dead %d unused %d\n",
++#if PG_VERSION_NUM < 90000
+ 						info == XLOG_HEAP2_CLEAN_MOVE ? "_move" : "",
++#else
++						"",
++#endif
+ 						spaceName, dbName, relName,
+ 						xlrec.block,
+ 						xlrec.nredirected, xlrec.ndead, nunused);
+@@ -1045,6 +1054,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
+ 						   ItemPointerGetOffsetNumber(&xlrec.newtid));
+ 					break;
+ 				}
++#if PG_VERSION_NUM < 90000
+ 				case XLOG_HEAP_MOVE:
+ 				{
+ 					xl_heap_update xlrec;
+@@ -1062,6 +1072,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
+ 						   ItemPointerGetOffsetNumber(&xlrec.newtid));
+ 					break;
+ 				}
++#endif
+ 				case XLOG_HEAP_NEWPAGE:
+ 				{
+ 					xl_heap_newpage xlrec;
