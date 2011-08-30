@@ -20,7 +20,7 @@ diff -rc xlogdump.orig/Makefile xlogdump/Makefile
   PG_CPPFLAGS = -I$(libpq_srcdir)
 diff -rc xlogdump.orig/xlogdump.c xlogdump/xlogdump.c
 *** xlogdump.orig/xlogdump.c	2011-08-30 08:16:28.000000000 +0900
---- xlogdump/xlogdump.c	2011-08-30 09:12:26.000000000 +0900
+--- xlogdump/xlogdump.c	2011-08-30 10:15:51.000000000 +0900
 ***************
 *** 17,24 ****
   #include "postgres.h"
@@ -85,20 +85,21 @@ diff -rc xlogdump.orig/xlogdump.c xlogdump/xlogdump.c
   					int total_off;
 ***************
 *** 958,964 ****
---- 963,972 ----
+--- 963,973 ----
   					if (total_off > xlrec.nredirected + xlrec.ndead)
   						nunused = total_off - (xlrec.nredirected + xlrec.ndead);
   					printf("clean%s: ts %s db %s rel %s block %u redirected %d dead %d unused %d\n",
 + #if PG_VERSION_NUM < 90000
   						info == XLOG_HEAP2_CLEAN_MOVE ? "_move" : "",
-+ #endif
++ #else
 + 						"",
++ #endif
   						spaceName, dbName, relName,
   						xlrec.block,
   						xlrec.nredirected, xlrec.ndead, nunused);
 ***************
 *** 1045,1050 ****
---- 1053,1059 ----
+--- 1054,1060 ----
   						   ItemPointerGetOffsetNumber(&xlrec.newtid));
   					break;
   				}
@@ -108,7 +109,7 @@ diff -rc xlogdump.orig/xlogdump.c xlogdump/xlogdump.c
   					xl_heap_update xlrec;
 ***************
 *** 1062,1067 ****
---- 1071,1077 ----
+--- 1072,1078 ----
   						   ItemPointerGetOffsetNumber(&xlrec.newtid));
   					break;
   				}
