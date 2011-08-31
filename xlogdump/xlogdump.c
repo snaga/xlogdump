@@ -1453,16 +1453,18 @@ help(void)
 	printf("Usage:\n");
 	printf("  xlogdump [OPTION]... [segment file]\n");
 	printf("\nOptions controlling the output content:\n");
-	printf("  -r, --rmname=OPERATION    Outuputs only the transaction log records\n"); 
+	printf("  -r, --rmname=OPERATION    Outputs only the transaction log records\n"); 
 	printf("                            containing the specified operation\n");
-	printf("  -t, --transactions        Outuputs only transaction info: the xid,\n");
+	printf("  -t, --transactions        Outputs only transaction info: the xid,\n");
 	printf("                            total length and status of each transaction\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
 	printf("                            physical changes found within the xlog segments\n");
+	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
 	printf("\nConnection options:\n");
 	printf("  -h, --host=HOST           database server host or socket directory\n");
 	printf("  -p, --port=PORT           database server port number\n");
 	printf("  -U, --username=NAME       connect as specified database user\n\n");
+	printf("  -?, --help                Show this help.\n\n");
 	printf("Report bugs to <diogob@gmail.com>.\n");
 	exit(0);
 }
@@ -1476,7 +1478,7 @@ main(int argc, char** argv)
 		{"transactions", no_argument, NULL, 't'},
 		{"statements", no_argument, NULL, 's'},
 		{"hide-timestamps", no_argument, NULL, 'T'},	
-		{"rmid", required_argument, NULL, 'r'},
+		{"rmname", required_argument, NULL, 'r'},
 		{"host", required_argument, NULL, 'h'},
 		{"port", required_argument, NULL, 'p'},
 		{"username", required_argument, NULL, 'U'},
@@ -1487,7 +1489,7 @@ main(int argc, char** argv)
 	if (argc == 1 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-?"))
 		help();
 
-	while ((c = getopt_long(argc, argv, "stcTr:h:p:U:",
+	while ((c = getopt_long(argc, argv, "stTr:h:p:U:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -1503,7 +1505,7 @@ main(int argc, char** argv)
 			case 'T':			/* hide timestamps (used for testing) */
 				hideTimestamps = true;
 				break;
-			case 'r':			/* output only rmid passed */
+			case 'r':			/* output only rmname passed */
 				sprintf(rmname, "%-5s", optarg);
 				break;
 			case 'h':			/* host for tranlsting oids */
@@ -1529,7 +1531,7 @@ main(int argc, char** argv)
 
 	if (strcmp("ALL  ", rmname) && transactions)
 	{
-		fprintf(stderr, "options \"rmid\" (-r) and \"transactions\" (-t) cannot be used together\n");
+		fprintf(stderr, "options \"rmname\" (-r) and \"transactions\" (-t) cannot be used together\n");
 		exit(1);
 	}
 
