@@ -37,6 +37,7 @@
 #include "pqexpbuffer.h"
 
 #include "xlogdump.h"
+#include "xlogdump_oid2name.h"
 
 static int		logFd;		/* kernel FD for current input file */
 static TimeLineID	logTLI;		/* current log file timeline */
@@ -50,11 +51,6 @@ static XLogRecPtr	prevRecPtr;	/* logical address of previous record */
 static char		*readRecordBuf = NULL; /* ReadRecord result area */
 static uint32		readRecordBufSize = 0;
 
-static PGconn		*conn = NULL; /* Connection for translating oids of global objects */
-static PGconn		*lastDbConn = NULL; /* Connection for translating oids of per database objects */
-static PGresult		*res;
-static PQExpBuffer	dbQry;
-
 /* command-line parameters */
 static bool 		transactions = false; /* when true we just aggregate transaction info */
 static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
@@ -63,11 +59,6 @@ static char 		rmname[5] = "ALL  "; /* name of the operation we want to filter on
 const char 		*pghost = NULL; /* connection host */
 const char 		*pgport = NULL; /* connection port */
 const char 		*username = NULL; /* connection username */
-
-/* Oids used for checking if we need to search for an objects name or if we can use the last one */
-static Oid 		lastDbOid;
-static Oid 		lastSpcOid;
-static Oid 		lastRelOid;
 
 /* Buffers to hold objects names */
 static char 		spaceName[NAMEDATALEN] = "";
@@ -104,13 +95,10 @@ typedef struct
 /* prototypes */
 static bool readXLogPage(void);
 void exit_gracefuly(int);
-PGconn * DBConnect(const char *, const char *, char *, const char *);
 static bool RecordIsValid(XLogRecord *, XLogRecPtr);
 static bool ReadRecord(void);
 static char *str_time(time_t);
-static void getSpaceName(uint32);
-static void getDbName(uint32);
-static void getRelName(uint32);
+
 static int printField(char *, int, int, uint32);
 static void printUpdate(xl_heap_update *, uint32);
 static void printInsert(xl_heap_insert *, uint32);
@@ -154,62 +142,10 @@ readXLogPage(void)
 void
 exit_gracefuly(int status)
 {
-	destroyPQExpBuffer(dbQry);
-	if(lastDbConn)
-		PQfinish(lastDbConn);
-	if(conn)
-		PQfinish(conn);
+	DBDisconnect();
 
 	close(logFd);
 	exit(status);
-}
-
-/*
- * Open a database connection
- */
-PGconn *
-DBConnect(const char *host, const char *port, char *database, const char *user)
-{
-	char	*password = NULL;
-	char	*password_prompt = NULL;
-	bool	need_pass;
-	PGconn	*conn = NULL;
-
-	/* loop until we have a password if requested by backend */
-	do
-	{
-		need_pass = false;
-
-		conn = PQsetdbLogin(host,
-	                     port,
-	                     NULL,
-	                     NULL,
-	                     database,
-	                     user,
-	                     password);
-
-		if (PQstatus(conn) == CONNECTION_BAD &&
-			strcmp(PQerrorMessage(conn), PQnoPasswordSupplied) == 0 &&
-			!feof(stdin))
-		{
-			PQfinish(conn);
-			need_pass = true;
-			free(password);
-			password = NULL;
-			printf("\nPassword: ");
-			password = simple_prompt(password_prompt, 100, false);
-		}
-	} while (need_pass);
-
-	/* Check to see that the backend connection was successfully made */
-	if (PQstatus(conn) == CONNECTION_BAD)
-	{
-		fprintf(stderr, "Connection to database failed: %s",
-			PQerrorMessage(conn));
-		exit_gracefuly(1);
-	}
-	
-	return conn;
 }
 
 /*
@@ -454,120 +390,6 @@ str_time(time_t tnow)
 }
 
 /*
- * Atempt to read the name of tablespace into lastSpcName
- * (if there's a database connection and the oid changed since lastSpcOid)
- */
-static void
-getSpaceName(uint32 space)
-{
-	resetPQExpBuffer(dbQry);
-	if((conn) && (lastSpcOid != space))
-	{
-		PQclear(res);
-		appendPQExpBuffer(dbQry, "SELECT spcname FROM pg_tablespace WHERE oid = %i", space);
-		res = PQexec(conn, dbQry->data);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			exit_gracefuly(1);
-		}
-		resetPQExpBuffer(dbQry);
-		lastSpcOid = space;
-		if(PQntuples(res) > 0)
-		{
-			strcpy(spaceName, PQgetvalue(res, 0, 0));
-			return;
-		}
-	}
-	else if(lastSpcOid == space)
-		return;
-
-	/* Didn't find the name, return string with oid */
-	sprintf(spaceName, "%u", space);
-	return;
-}
-
-/*
- * Atempt to get the name of database (if there's a database connection)
- */
-static void
-getDbName(uint32 db)
-{
-	resetPQExpBuffer(dbQry);
-	if((conn) && (lastDbOid != db))
-	{	
-		PQclear(res);
-		appendPQExpBuffer(dbQry, "SELECT datname FROM pg_database WHERE oid = %i", db);
-		res = PQexec(conn, dbQry->data);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			exit_gracefuly(1);
-		}
-		resetPQExpBuffer(dbQry);
-		lastDbOid = db;
-		if(PQntuples(res) > 0)
-		{
-			strcpy(dbName, PQgetvalue(res, 0, 0));
-
-			// Database changed makes new connection
-			PQfinish(lastDbConn);
-			lastDbConn = DBConnect(pghost, pgport, dbName, username);
-
-			return;
-		}
-	}
-	else if(lastDbOid == db)
-		return;
-
-	/* Didn't find the name, return string with oid */
-	sprintf(dbName, "%u", db);
-	return;
-}
-
-/*
- * Atempt to get the name of relation and copy to relName 
- * (if there's a database connection and the reloid changed)
- * Copy a string with oid if not found
- */
-static void
-getRelName(uint32 relid)
-{
-	resetPQExpBuffer(dbQry);
-	if((conn) && (lastDbConn) && (lastRelOid != relid))
-	{
-		PQclear(res);
-		/* Try the relfilenode and oid just in case the filenode has changed
-		   If it has changed more than once we can't translate it's name */
-		appendPQExpBuffer(dbQry, "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
-		res = PQexec(lastDbConn, dbQry->data);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			exit_gracefuly(1);
-		}
-		resetPQExpBuffer(dbQry);
-		lastRelOid = relid;
-		if(PQntuples(res) > 0)
-		{
-			strcpy(relName, PQgetvalue(res, 0, 0));
-			/* copy the oid since it could be different from relfilenode */
-			lastRelOid = (uint32) atoi(PQgetvalue(res, 0, 1));
-			return;
-		}
-	}
-	else if(lastRelOid == relid)
-		return;
-	
-	/* Didn't find the name, return string with oid */
-	sprintf(relName, "%u", relid);
-	return;
-}
-
-/*
  * Print the field based on a chunk of xlog data and the field type
  * The maxfield len is just for error detection on variable length data,
  * actualy is based on the xlog record total lenght
@@ -669,27 +491,22 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen)
 	printf("UPDATE \"%s\" SET ", relName);
 
 	// Get relation field names and types
-	if((conn) && (lastDbConn))
+	if(do_oid2name())
 	{
 		int	i, rows = 0, fieldSize = 0;
 		
-		resetPQExpBuffer(dbQry);
-		PQclear(res);
-		appendPQExpBuffer(dbQry, "SELECT attname, atttypid from pg_attribute where attnum > 0 AND attrelid = '%i' ORDER BY attnum", lastRelOid);
-		res = PQexec(lastDbConn, dbQry->data);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			exit_gracefuly(1);
-		}
-		resetPQExpBuffer(dbQry);
-		rows = PQntuples(res);
+		rows = relid2attr_begin();
+
 		offset = 0;
 
 		for(i = 0; i < rows; i++)
 		{
-			printf("%s%s = ", (i == 0 ? "" : ", "), PQgetvalue(res, i, 0));
+			char attname[NAMEDATALEN];
+			Oid atttypid;
+
+			relid2attr_fetch(i, attname, &atttypid);
+
+			printf("%s%s = ", (i == 0 ? "" : ", "), attname);
 
 			/* is the attribute value null? */
 			if((hhead.t_infomask & HEAP_HASNULL) && (att_isnull(i, nullBitMap)))
@@ -699,7 +516,7 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen)
 			else
 			{
 				printf("'");
-				if(!(fieldSize = printField(data, offset, atoi(PQgetvalue(res, i, 1)), datalen)))
+				if(!(fieldSize = printField(data, offset, atttypid, datalen)))
 					break;
 
 				printf("'");
@@ -737,30 +554,32 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen)
 	printf("INSERT INTO \"%s\" (", relName);
 	
 	// Get relation field names and types
-	if((conn) && (lastDbConn))
+	if (do_oid2name())
 	{
 		int	i, rows = 0, fieldSize = 0;
 		
-		resetPQExpBuffer(dbQry);
-		PQclear(res);
-		appendPQExpBuffer(dbQry, "SELECT attname, atttypid from pg_attribute where attnum > 0 AND attrelid = '%i' ORDER BY attnum", lastRelOid);
-		res = PQexec(lastDbConn, dbQry->data);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			exit_gracefuly(1);
-		}
-		resetPQExpBuffer(dbQry);
-		rows = PQntuples(res);
+		rows = relid2attr_begin();
+
 		for(i = 0; i < rows; i++)
-			printf("%s%s", (i == 0 ? "" : ", "), PQgetvalue(res, i, 0));
+		{
+			char attname[NAMEDATALEN];
+			Oid atttypid;
+
+			relid2attr_fetch(i, attname, &atttypid);
+
+			printf("%s%s", (i == 0 ? "" : ", "), attname);
+		}
 
 		printf(") VALUES (");
 		offset = 0;
 
 		for(i = 0; i < rows; i++)
 		{
+			char attname[NAMEDATALEN];
+			Oid atttypid;
+
+			relid2attr_fetch(i, attname, &atttypid);
+
 			/* is the attribute value null? */
 			if((hhead.t_infomask & HEAP_HASNULL) && (att_isnull(i, nullBitMap)))
 			{
@@ -769,7 +588,7 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen)
 			else
 			{
 				printf("%s'", (i == 0 ? "" : ", "));
-				if(!(fieldSize = printField(data, offset, atoi(PQgetvalue(res, i, 1)), datalen)))
+				if(!(fieldSize = printField(data, offset, atttypid, datalen)))
 				{
 					printf("'");
 					break;
@@ -781,6 +600,8 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen)
 			}
 		}
 		printf(");\n");
+
+		relid2attr_end();
 	}
 }
 
@@ -826,9 +647,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 		if (!(record->xl_info & (XLR_SET_BKP_BLOCK(i))))
 			continue;
 		memcpy(&bkb, blk, sizeof(BkpBlock));
-		getSpaceName(bkb.node.spcNode);
-		getDbName(bkb.node.dbNode);
-		getRelName(bkb.node.relNode);
+		getSpaceName(bkb.node.spcNode, spaceName, sizeof(spaceName));
+		getDbName(bkb.node.dbNode, dbName, sizeof(dbName));
+		getRelName(bkb.node.relNode, relName, sizeof(relName));
 		printf("bkpblock %d: ts %s db %s rel %s block %u hole %u len %u\n", 
 				i+1, spaceName, dbName, relName,
 			   	bkb.block, bkb.hole_offset, bkb.hole_length);
@@ -911,9 +732,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 				xl_smgr_create	xlrec;
 
 				memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-				getSpaceName(xlrec.rnode.spcNode);
-				getDbName(xlrec.rnode.dbNode);
-				getRelName(xlrec.rnode.relNode);
+				getSpaceName(xlrec.rnode.spcNode, spaceName, sizeof(spaceName));
+				getDbName(xlrec.rnode.dbNode, dbName, sizeof(dbName));
+				getRelName(xlrec.rnode.relNode, relName, sizeof(relName));
 				printf("create rel: %s/%s/%s\n", 
 						spaceName, dbName, relName);
 			}
@@ -922,9 +743,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 				xl_smgr_truncate	xlrec;
 
 				memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-				getSpaceName(xlrec.rnode.spcNode);
-				getDbName(xlrec.rnode.dbNode);
-				getRelName(xlrec.rnode.relNode);
+				getSpaceName(xlrec.rnode.spcNode, spaceName, sizeof(spaceName));
+				getDbName(xlrec.rnode.dbNode, dbName, sizeof(dbName));
+				getRelName(xlrec.rnode.relNode, relName, sizeof(relName));
 				printf("truncate rel: %s/%s/%s at block %u\n",
 					 spaceName, dbName, relName, xlrec.blkno);
 			}
@@ -995,9 +816,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					int nunused = 0;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.node.spcNode);
-					getDbName(xlrec.node.dbNode);
-					getRelName(xlrec.node.relNode);
+					getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.node.relNode, relName, sizeof(relName));
 					total_off = (record->xl_len - SizeOfHeapClean) / sizeof(OffsetNumber);
 					if (total_off > xlrec.nredirected + xlrec.ndead)
 						nunused = total_off - (xlrec.nredirected + xlrec.ndead);
@@ -1024,9 +845,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					if(statements)
 						printInsert((xl_heap_insert *) XLogRecGetData(record), record->xl_len - SizeOfHeapInsert - SizeOfHeapHeader);
@@ -1056,9 +877,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_heap_delete xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 					
 					if(statements)
 						printf("DELETE FROM %s WHERE ...", relName);
@@ -1076,9 +897,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_heap_update xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					if(statements)
 						printUpdate((xl_heap_update *) XLogRecGetData(record), record->xl_len - SizeOfHeapUpdate - SizeOfHeapHeader);
@@ -1099,9 +920,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_heap_update xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 					printf("move%s: ts %s db %s rel %s block %u off %u to block %u off %u\n",
 						   (info & XLOG_HEAP_INIT_PAGE) ? "(init)" : "",
 						   spaceName, dbName, relName,
@@ -1117,9 +938,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_heap_newpage xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.node.spcNode);
-					getDbName(xlrec.node.dbNode);
-					getRelName(xlrec.node.relNode);
+					getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.node.relNode, relName, sizeof(relName));
 					printf("newpage: ts %s db %s rel %s block %u\n", 
 							spaceName, dbName, relName,
 						   xlrec.blkno);
@@ -1130,9 +951,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_heap_lock xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 					printf("lock %s: ts %s db %s rel %s block %u off %u\n",
 						   xlrec.shared_lock ? "shared" : "exclusive",
 						   spaceName, dbName, relName,
@@ -1146,9 +967,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_heap_inplace xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 					printf("inplace: ts %s db %s rel %s block %u off %u\n", 
 							spaceName, dbName, relName,
 						   	ItemPointerGetBlockNumber(&xlrec.target.tid),
@@ -1166,9 +987,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_insert xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					printf("insert_leaf: index %s/%s/%s tid %u/%u\n",
 							spaceName, dbName, relName,
@@ -1181,9 +1002,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_insert xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					printf("insert_upper: index %s/%s/%s tid %u/%u\n",
 							spaceName, dbName, relName,
@@ -1203,9 +1024,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 					datapos += SizeOfBtreeSplit;
-					getSpaceName(xlrec.node.spcNode);
-					getDbName(xlrec.node.dbNode);
-					getRelName(xlrec.node.relNode);
+					getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.node.relNode, relName, sizeof(relName));
 
 					printf("split_l%s: index %s/%s/%s rightsib %u\n",
 							info == XLOG_BTREE_SPLIT_L_ROOT ? "_root" : "",
@@ -1244,9 +1065,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_split xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.node.spcNode);
-					getDbName(xlrec.node.dbNode);
-					getRelName(xlrec.node.relNode);
+					getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.node.relNode, relName, sizeof(relName));
 
 					printf("split_r%s: index %s/%s/%s leftsib %u\n", 
 							info == XLOG_BTREE_SPLIT_R_ROOT ? "_root" : "",
@@ -1258,9 +1079,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_delete xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.node.spcNode);
-					getDbName(xlrec.node.dbNode);
-					getRelName(xlrec.node.relNode);
+					getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.node.relNode, relName, sizeof(relName));
 					printf("delete: index %s/%s/%s block %u\n", 
 							spaceName, dbName,	relName,
 						   	xlrec.block);
@@ -1271,9 +1092,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_delete_page xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					printf("delete_page: index %s/%s/%s tid %u/%u deadblk %u\n",
 							spaceName, dbName, relName,
@@ -1288,9 +1109,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_metadata md;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					memcpy(&md, XLogRecGetData(record) + sizeof(xlrec),
 						sizeof(xl_btree_metadata));
@@ -1308,9 +1129,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_newroot xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.node.spcNode);
-					getDbName(xlrec.node.dbNode);
-					getRelName(xlrec.node.relNode);
+					getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.node.relNode, relName, sizeof(relName));
 
 					printf("newroot: index %s/%s/%s rootblk %u level %u\n", 
 							spaceName, dbName, relName,
@@ -1322,9 +1143,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					xl_btree_delete_page xlrec;
 
 					memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-					getSpaceName(xlrec.target.node.spcNode);
-					getDbName(xlrec.target.node.dbNode);
-					getRelName(xlrec.target.node.relNode);
+					getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
+					getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
+					getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
 					printf("delete_page_half: index %s/%s/%s tid %u/%u deadblk %u\n",
 							spaceName, dbName, relName,
@@ -1537,9 +1358,8 @@ main(int argc, char** argv)
 
 	if(pghost)
 	{
-		conn = DBConnect(pghost, pgport, "template1", username);
+		DBConnect(pghost, pgport, "template1", username);
 	}
-	dbQry = createPQExpBuffer();
 
 	for (i = optind; i < argc; i++)
 	{
@@ -1748,9 +1568,9 @@ void dump_xlog_btree_insert_meta(XLogRecord *record)
 	datapos = (char *) xlrec + SizeOfBtreeInsert;
 	datalen = record->xl_len - SizeOfBtreeInsert;
 
-	getSpaceName(xlrec->target.node.spcNode);
-	getDbName(xlrec->target.node.dbNode);
-	getRelName(xlrec->target.node.relNode);
+	getSpaceName(xlrec->target.node.spcNode, spaceName, sizeof(spaceName));
+	getDbName(xlrec->target.node.dbNode, dbName, sizeof(dbName));
+	getRelName(xlrec->target.node.relNode, relName, sizeof(relName));
 
 	/* downlink */
 	memcpy(&downlink, datapos, sizeof(BlockNumber));
