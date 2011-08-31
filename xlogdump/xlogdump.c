@@ -78,12 +78,51 @@ static char 		relName[NAMEDATALEN]  = "";
 /* struct to aggregate transactions */
 transInfoPtr 		transactionsInfo = NULL;
 
+typedef struct
+{
+    gistxlogPageUpdate *data;
+    int         len;
+    IndexTuple *itup;
+    OffsetNumber *todelete;
+} PageUpdateRecord;
+
+/* copied from backend/access/gist/gistxlog.c */
+typedef struct
+{
+    gistxlogPage *header;
+    IndexTuple *itup;
+} NewPage;
+
+/* copied from backend/access/gist/gistxlog.c */
+typedef struct
+{
+    gistxlogPageSplit *data;
+    NewPage    *page;
+} PageSplitRecord;
+
+
 /* prototypes */
-void exit_gracefuly(int status);
-PGconn * DBConnect(const char *host, const char *port, char *database, const char *user);
-static void dumpXLogRecord(XLogRecord *record, bool header_only);
-static void dumpGIST(XLogRecord *record);
-void dump_xlog_btree_insert_meta(XLogRecord *record);
+static bool readXLogPage(void);
+void exit_gracefuly(int);
+PGconn * DBConnect(const char *, const char *, char *, const char *);
+static bool RecordIsValid(XLogRecord *, XLogRecPtr);
+static bool ReadRecord(void);
+static char *str_time(time_t);
+static void getSpaceName(uint32);
+static void getDbName(uint32);
+static void getRelName(uint32);
+static int printField(char *, int, int, uint32);
+static void printUpdate(xl_heap_update *, uint32);
+static void printInsert(xl_heap_insert *, uint32);
+static void dumpXLogRecord(XLogRecord *, bool);
+static void addTransaction(XLogRecord *);
+static void dumpTransactions();
+static void dumpXLog(char *);
+static void help(void);
+static void decodePageUpdateRecord(PageUpdateRecord *, XLogRecord *);
+static void decodePageSplitRecord(PageSplitRecord *, XLogRecord *);
+void dumpGIST(XLogRecord *);
+void dump_xlog_btree_insert_meta(XLogRecord *);
 
 /* Read another page, if possible */
 static bool
@@ -1540,14 +1579,6 @@ ExceptionalCondition(const char *conditionName,
 }
 #endif
 
-typedef struct
-{
-    gistxlogPageUpdate *data;
-    int         len;
-    IndexTuple *itup;
-    OffsetNumber *todelete;
-} PageUpdateRecord;
-
 /* copied from backend/access/gist/gistxlog.c */
 static void
 decodePageUpdateRecord(PageUpdateRecord *decoded, XLogRecord *record)
@@ -1585,20 +1616,6 @@ decodePageUpdateRecord(PageUpdateRecord *decoded, XLogRecord *record)
 		i++;
 	}
 }
-
-/* copied from backend/access/gist/gistxlog.c */
-typedef struct
-{
-    gistxlogPage *header;
-    IndexTuple *itup;
-} NewPage;
-
-/* copied from backend/access/gist/gistxlog.c */
-typedef struct
-{
-    gistxlogPageSplit *data;
-    NewPage    *page;
-} PageSplitRecord;
 
 /* copied from backend/access/gist/gistxlog.c */
 static void
