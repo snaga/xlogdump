@@ -17,8 +17,9 @@
 #include "postgres.h"
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <getopt_long.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "access/clog.h"
 #include "access/htup.h"
@@ -29,8 +30,10 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
+#include "utils/pg_crc.h"
 
 #include "libpq-fe.h"
+#include "pg_config.h"
 #include "pqexpbuffer.h"
 
 #include "xlogdump.h"
@@ -300,7 +303,7 @@ restart:
 		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
 		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
 	{
-		printf("invalid record length(expected %lu ~ %lu, actual %d) at %X/%X\n",
+		printf("invalid record length(expected %u ~ %u, actual %d) at %X/%X\n",
 				SizeOfXLogRecord + record->xl_len,
 				SizeOfXLogRecord + record->xl_len +
 					XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ),
@@ -944,7 +947,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 				}
 				break;
 				case XLOG_HEAP2_CLEAN:
+#if PG_VERSION_NUM < 90000
 				case XLOG_HEAP2_CLEAN_MOVE:
+#endif
 				{
 					xl_heap_clean xlrec;
 					int total_off;
@@ -958,7 +963,11 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 					if (total_off > xlrec.nredirected + xlrec.ndead)
 						nunused = total_off - (xlrec.nredirected + xlrec.ndead);
 					printf("clean%s: ts %s db %s rel %s block %u redirected %d dead %d unused %d\n",
+#if PG_VERSION_NUM < 90000
 						info == XLOG_HEAP2_CLEAN_MOVE ? "_move" : "",
+#else
+						"",
+#endif
 						spaceName, dbName, relName,
 						xlrec.block,
 						xlrec.nredirected, xlrec.ndead, nunused);
@@ -1045,6 +1054,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 						   ItemPointerGetOffsetNumber(&xlrec.newtid));
 					break;
 				}
+#if PG_VERSION_NUM < 90000
 				case XLOG_HEAP_MOVE:
 				{
 					xl_heap_update xlrec;
@@ -1062,6 +1072,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 						   ItemPointerGetOffsetNumber(&xlrec.newtid));
 					break;
 				}
+#endif
 				case XLOG_HEAP_NEWPAGE:
 				{
 					xl_heap_newpage xlrec;
