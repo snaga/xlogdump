@@ -65,5 +65,3 @@ typedef struct xl_smgr_truncate
 	RelFileNode rnode;
 } xl_smgr_truncate;
 
-/* Maximum size of a null bitmap based on max number of attributes per tuple */
-#define MaxNullBitmapLen	BITMAPLEN(MaxTupleAttributeNumber)

@@ -66,7 +66,7 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 	{
 		fprintf(stderr, "Connection to database failed: %s",
 			PQerrorMessage(conn));
-		exit_gracefuly(1);
+		return false;
 	}
 	
 	dbQry = createPQExpBuffer();
@@ -78,7 +78,7 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
  * Atempt to read the name of tablespace into lastSpcName
  * (if there's a database connection and the oid changed since lastSpcOid)
  */
-void
+char *
 getSpaceName(uint32 space, char *buf, size_t buflen)
 {
 	resetPQExpBuffer(dbQry);
@@ -91,30 +91,30 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
 		{
 			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 			PQclear(res);
-			exit_gracefuly(1);
+			return NULL;
 		}
 		resetPQExpBuffer(dbQry);
 		lastSpcOid = space;
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
-			return;
+			return buf;
 		}
 	}
 	else if(lastSpcOid == space)
-		return;
+		return buf;
 
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", space);
 
-	return;
+	return buf;
 }
 
 
 /*
  * Atempt to get the name of database (if there's a database connection)
  */
-void
+char *
 getDbName(uint32 db, char *buf, size_t buflen)
 {
 	resetPQExpBuffer(dbQry);
@@ -127,7 +127,7 @@ getDbName(uint32 db, char *buf, size_t buflen)
 		{
 			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 			PQclear(res);
-			exit_gracefuly(1);
+			return NULL;
 		}
 		resetPQExpBuffer(dbQry);
 		lastDbOid = db;
@@ -146,15 +146,15 @@ getDbName(uint32 db, char *buf, size_t buflen)
 						  pguser,
 						  pgpass);
 
-			return;
+			return buf;
 		}
 	}
 	else if(lastDbOid == db)
-		return;
+		return buf;
 
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", db);
-	return;
+	return buf;
 }
 
 /*
@@ -162,7 +162,7 @@ getDbName(uint32 db, char *buf, size_t buflen)
  * (if there's a database connection and the reloid changed)
  * Copy a string with oid if not found
  */
-void
+char *
 getRelName(uint32 relid, char *buf, size_t buflen)
 {
 	resetPQExpBuffer(dbQry);
@@ -177,7 +177,7 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 		{
 			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 			PQclear(res);
-			exit_gracefuly(1);
+			return NULL;
 		}
 		resetPQExpBuffer(dbQry);
 		lastRelOid = relid;
@@ -186,20 +186,20 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
 			/* copy the oid since it could be different from relfilenode */
 			lastRelOid = (uint32) atoi(PQgetvalue(res, 0, 1));
-			return;
+			return buf;
 		}
 	}
 	else if(lastRelOid == relid)
-		return;
+		return buf;
 	
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", relid);
-	return;
+	return buf;
 }
 
 
 int
-relid2attr_begin()
+relid2attr_begin(void)
 {
 	resetPQExpBuffer(dbQry);
 	PQclear(res);
@@ -210,7 +210,7 @@ relid2attr_begin()
 	{
 		fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 		PQclear(res);
-		exit_gracefuly(1);
+		return -1;
 	}
 	resetPQExpBuffer(dbQry);
 
@@ -222,6 +222,7 @@ relid2attr_fetch(int i, char *attname, Oid *atttypid)
 {
 	snprintf(attname, NAMEDATALEN, PQgetvalue(res, i, 0));
 	*atttypid = atoi( PQgetvalue(res, i, 1) );
+	return i;
 }
 
 void

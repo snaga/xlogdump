@@ -6,11 +6,11 @@
 
 bool DBConnect(const char *, const char *, char *, const char *);
 
-void getSpaceName(uint32, char *, size_t);
-void getDbName(uint32, char *, size_t);
-void getRelName(uint32, char *, size_t);
+char *getSpaceName(uint32, char *, size_t);
+char *getDbName(uint32, char *, size_t);
+char *getRelName(uint32, char *, size_t);
 
-int relid2attr_begin();
+int relid2attr_begin(void);
 int relid2attr_fetch(int, char *, Oid *);
 void relid2attr_end(void);
 
