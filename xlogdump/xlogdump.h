@@ -50,18 +50,3 @@ static const char * const status_names[3] = {
 	"ABORTED     "
 };
 
-/* XXX these ought to be in smgr.h, but are not */
-#define XLOG_SMGR_CREATE	0x10
-#define XLOG_SMGR_TRUNCATE	0x20
-
-typedef struct xl_smgr_create
-{
-	RelFileNode rnode;
-} xl_smgr_create;
-
-typedef struct xl_smgr_truncate
-{
-	BlockNumber blkno;
-	RelFileNode rnode;
-} xl_smgr_truncate;
-
