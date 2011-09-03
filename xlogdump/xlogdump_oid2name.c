@@ -1,3 +1,9 @@
+/*
+ * xlogdump_oid2name.c
+ *
+ * a collection of functions to get database object names from the oids
+ * by looking up the system catalog.
+ */
 #include "xlogdump_oid2name.h"
 
 #include "pqexpbuffer.h"

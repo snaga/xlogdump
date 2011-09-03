@@ -1,9 +1,21 @@
+/*
+ * xlogdump_statement.c
+ *
+ * a collection of functions to build/re-produce (fake) SQL statements
+ * from xlog records.
+ */
 #include "xlogdump_statement.h"
 
+#include "access/tupmacs.h"
 #include "storage/bufpage.h"
+
 #include "xlogdump_oid2name.h"
 
 static int printField(char *, int, int, uint32);
+
+#if PG_VERSION_NUM < 80300
+#define MaxHeapTupleSize  (BLCKSZ - MAXALIGN(sizeof(PageHeaderData)))
+#endif
 
 /*
  * Print a insert command that contains all the data on a xl_heap_insert
@@ -27,7 +39,11 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 	   and the tuple null bitmap into nullBitMap */
 	memcpy(&hhead, (char *) xlrecord + SizeOfHeapInsert, SizeOfHeapHeader);
 	memcpy(&data, (char *) xlrecord + hhead.t_hoff - 4, datalen);
+#if PG_VERSION_NUM >= 80300
 	memcpy(&nullBitMap, (bits8 *) xlrecord + SizeOfHeapInsert + SizeOfHeapHeader, BITMAPLEN(HeapTupleHeaderGetNatts(&hhead)) * sizeof(bits8));
+#else
+#warning "Copying null bitmap is not implemented for 8.2.x." /* FIXME: need to fix for 8.2 */
+#endif
 	
 	printf("INSERT INTO \"%s\" (", relName);
 	
@@ -105,7 +121,11 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 	   and the tuple null bitmap into nullBitMap */
 	memcpy(&hhead, (char *) xlrecord + SizeOfHeapUpdate, SizeOfHeapHeader);
 	memcpy(&data, (char *) xlrecord + hhead.t_hoff + 4, datalen);
+#if PG_VERSION_NUM >= 80300
 	memcpy(&nullBitMap, (bits8 *) xlrecord + SizeOfHeapUpdate + SizeOfHeapHeader, BITMAPLEN(HeapTupleHeaderGetNatts(&hhead)) * sizeof(bits8));
+#else
+#warning "Copying null bitmap is not implemented for 8.2.x." /* FIXME: need to fix for 8.2 */
+#endif
 
 	printf("UPDATE \"%s\" SET ", relName);
 

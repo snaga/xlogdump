@@ -75,6 +75,8 @@ static bool RecordIsValid(XLogRecord *, XLogRecPtr);
 static bool ReadRecord(void);
 
 static void dumpXLogRecord(XLogRecord *, bool);
+static void print_backup_blocks(XLogRecPtr, XLogRecord *);
+
 static void addTransaction(XLogRecord *);
 static void dumpTransactions();
 static void dumpXLog(char *);
@@ -158,8 +160,12 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 	}
 
 	/* skip total xl_tot_len check if physical log has been removed. */
+#if PG_VERSION_NUM < 80300
+	if (record->xl_info & XLR_BKP_BLOCK_MASK)
+#else
 	if (!(record->xl_info & XLR_BKP_REMOVABLE) ||
 		record->xl_info & XLR_BKP_BLOCK_MASK)
+#endif
 	{
 		/* Check that xl_tot_len agrees with our calculation */
 		if (blk != (char *) record + record->xl_tot_len)
@@ -348,14 +354,13 @@ restart:
 static void
 dumpXLogRecord(XLogRecord *record, bool header_only)
 {
-	int	i;
-	char   	*blk;
 	uint8	info = record->xl_info & ~XLR_INFO_MASK;
 
 	/* check if the user wants a specific rmid */
 	if(strcmp("ALL  ", rmname) && strcasecmp(RM_names[record->xl_rmid], rmname))
 		return;
 
+#ifdef NOT_USED
 	printf("%u/%08X: prv %u/%08X",
 		   curRecPtr.xlogid, curRecPtr.xrecoff,
 		   record->xl_prev.xlogid, record->xl_prev.xrecoff);
@@ -372,6 +377,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 
 	printf(" info %02X len %u tot_len %u\n", record->xl_info,
 		   record->xl_len, record->xl_tot_len);
+#endif
 
 	if (header_only)
 	{
@@ -379,58 +385,109 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 		return;
 	}
 
-	blk = (char*)XLogRecGetData(record) + record->xl_len;
+	/*
+	 * See rmgr.h for more details about the built-in resource managers.
+	 */
+	switch (record->xl_rmid)
+	{
+		case RM_XLOG_ID:
+			print_rmgr_xlog(curRecPtr, record, info, hideTimestamps);
+			break;
+		case RM_XACT_ID:
+			print_rmgr_xact(curRecPtr, record, info, hideTimestamps);
+			break;
+		case RM_SMGR_ID:
+			print_rmgr_smgr(curRecPtr, record, info);
+			break;
+		case RM_CLOG_ID:
+			print_rmgr_clog(curRecPtr, record, info);
+			break;
+		case RM_DBASE_ID:
+			print_rmgr_dbase(curRecPtr, record, info);
+			break;
+		case RM_TBLSPC_ID:
+			print_rmgr_tblspc(curRecPtr, record, info);
+			break;
+		case RM_MULTIXACT_ID:
+			print_rmgr_multixact(curRecPtr, record, info);
+			break;
+#if PG_VERSION_NUM >= 90000
+		case RM_RELMAP_ID:
+			print_rmgr_relmap(curRecPtr, record, info);
+			break;
+		case RM_STANDBY_ID:
+			print_rmgr_standby(curRecPtr, record, info);
+			break;
+#endif
+		case RM_HEAP2_ID:
+			print_rmgr_heap2(curRecPtr, record, info);
+			break;
+		case RM_HEAP_ID:
+			print_rmgr_heap(curRecPtr, record, info, statements);
+			break;
+		case RM_BTREE_ID:
+			print_rmgr_btree(curRecPtr, record, info);
+			break;
+		case RM_HASH_ID:
+			print_rmgr_hash(curRecPtr, record, info);
+			break;
+		case RM_GIN_ID:
+			print_rmgr_gin(curRecPtr, record, info);
+			break;
+		case RM_GIST_ID:
+			print_rmgr_gist(curRecPtr, record, info);
+			break;
+		case RM_SEQ_ID:
+			print_rmgr_seq(curRecPtr, record, info);
+			break;
+		default:
+			fprintf(stderr, "Unknown RMID %d.\n", record->xl_rmid);
+			break;
+	}
+
+	/*
+	 * print info about backup blocks.
+	 */
+	print_backup_blocks(curRecPtr, record);
+}
+
+static void
+print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
+{
+	char *blk;
+	int i;
+	char buf[1024];
+
+	/*
+	 * backup blocks by full_page_write
+	 */
+	blk = (char*)XLogRecGetData(rec) + rec->xl_len;
 	for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
 	{
 		BkpBlock  bkb;
 
-		if (!(record->xl_info & (XLR_SET_BKP_BLOCK(i))))
+		if (!(rec->xl_info & (XLR_SET_BKP_BLOCK(i))))
 			continue;
 		memcpy(&bkb, blk, sizeof(BkpBlock));
 		getSpaceName(bkb.node.spcNode, spaceName, sizeof(spaceName));
 		getDbName(bkb.node.dbNode, dbName, sizeof(dbName));
 		getRelName(bkb.node.relNode, relName, sizeof(relName));
-		printf("bkpblock %d: ts %s db %s rel %s block %u hole %u len %u\n", 
+		snprintf(buf, sizeof(buf), "bkpblock[%d]: s/d/r:%s/%s/%s blk:%u hole_off/len:%u/%u\n", 
 				i+1, spaceName, dbName, relName,
 			   	bkb.block, bkb.hole_offset, bkb.hole_length);
 		blk += sizeof(BkpBlock) + (BLCKSZ - bkb.hole_length);
-	}
 
-	switch (record->xl_rmid)
-	{
-		case RM_XLOG_ID:
-			print_rmgr_xlog(record, info, hideTimestamps);
-			break;
-		case RM_XACT_ID:
-			print_rmgr_xact(record, info, hideTimestamps);
-			break;
-		case RM_SMGR_ID:
-			print_rmgr_smgr(record, info);
-			break;
-		case RM_CLOG_ID:
-			print_rmgr_clog(record, info);
-			break;
-		case RM_MULTIXACT_ID:
-			print_rmgr_multixact(record, info);
-			break;
-		case RM_HEAP2_ID:
-			print_rmgr_heap2(record, info);
-			break;
-		case RM_HEAP_ID:
-			print_rmgr_heap(record, info, statements);
-			break;
-		case RM_BTREE_ID:
-			print_rmgr_btree(record, info);
-			break;
-		case RM_HASH_ID:
-			break;
-		case RM_GIST_ID:
-			print_rmgr_gist(record, info);
-			break;
-		case RM_SEQ_ID:
-			break;
+		printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s",
+		       cur.xlogid, cur.xrecoff,
+		       rec->xl_xid,
+		       rec->xl_rmid,
+		       RM_names[rec->xl_rmid],
+		       rec->xl_len, rec->xl_tot_len,
+		       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
+		       buf);
 	}
 }
+
 
 /*
  * Adds a transaction to a linked list of transactions
@@ -653,11 +710,19 @@ main(int argc, char** argv)
 #ifndef assert_enabled
 bool		assert_enabled = true;
 
+#if PG_VERSION_NUM < 80300
+int
+ExceptionalCondition(char *conditionName,
+					 char *errorType,
+					 char *fileName,
+					 int lineNumber)
+#else
 int
 ExceptionalCondition(const char *conditionName,
 					 const char *errorType,
 					 const char *fileName,
 					 int lineNumber)
+#endif
 {
 	fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
 			errorType, conditionName,

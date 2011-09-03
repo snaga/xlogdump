@@ -1,3 +1,9 @@
+/*
+ * xlogdump_rmgr.c
+ *
+ * a collection of functions which print xlog records generated
+ * by each resource manager.
+ */
 #include "xlogdump_rmgr.h"
 
 #include <time.h>
@@ -13,6 +19,25 @@
 
 #include "xlogdump_oid2name.h"
 #include "xlogdump_statement.h"
+
+const char * const RM_names[RM_MAX_ID+1] = {
+	"XLOG ",					/* 0 */
+	"XACT ",					/* 1 */
+	"SMGR ",					/* 2 */
+	"CLOG ",					/* 3 */
+	"DBASE",					/* 4 */
+	"TBSPC",					/* 5 */
+	"MXACT",					/* 6 */
+	"RM  7",					/* 7 */
+	"RM  8",					/* 8 */
+	"HEAP2",					/* 9 */
+	"HEAP ",					/* 10 */
+	"BTREE",					/* 11 */
+	"HASH ",					/* 12 */
+	"GIN",						/* 13 */
+	"GIST ",					/* 14 */
+	"SEQ  "						/* 15 */
+};
 
 static char *str_time(time_t);
 static bool dump_xlog_btree_insert_meta(XLogRecord *);
@@ -32,16 +57,37 @@ str_time(time_t tnow)
 	return buf;
 }
 
-void
-print_rmgr_xlog(XLogRecord *record, uint8 info, bool hideTimestamps)
+/*
+ * a common part called by each `print_rmgr_*()' to print a xlog record header
+ * with the detail.
+ */
+static void
+print_rmgr_record(XLogRecPtr cur, XLogRecord *rec, const char *detail)
 {
-	if (info == XLOG_CHECKPOINT_SHUTDOWN ||
-	    info == XLOG_CHECKPOINT_ONLINE)
+	printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s\n",
+	       cur.xlogid, cur.xrecoff,
+	       rec->xl_xid,
+	       rec->xl_rmid,
+	       RM_names[rec->xl_rmid],
+	       rec->xl_len, rec->xl_tot_len,
+	       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
+	       detail);
+}
+
+void
+print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimestamps)
+{
+	char buf[1024];
+
+	switch (info)
+	{
+	case XLOG_CHECKPOINT_SHUTDOWN:
+	case XLOG_CHECKPOINT_ONLINE:
 	{
 		CheckPoint	*checkpoint = (CheckPoint*) XLogRecGetData(record);
 		if(!hideTimestamps)
-			printf("checkpoint: redo %u/%08X; tli %u; nextxid %u;\n"
-			       "  nextoid %u; nextmulti %u; nextoffset %u; %s at %s\n",
+			snprintf(buf, sizeof(buf), "checkpoint: redo %u/%08X; tli %u; nextxid %u;"
+			       "  nextoid %u; nextmulti %u; nextoffset %u; %s at %s",
 			       checkpoint->redo.xlogid, checkpoint->redo.xrecoff,
 			       checkpoint->ThisTimeLineID, checkpoint->nextXid, 
 			       checkpoint->nextOid,
@@ -51,8 +97,8 @@ print_rmgr_xlog(XLogRecord *record, uint8 info, bool hideTimestamps)
 			       "shutdown" : "online",
 			       str_time(checkpoint->time));
 		else
-			printf("checkpoint: redo %u/%08X; tli %u; nextxid %u;\n"
-			       "  nextoid %u; nextmulti %u; nextoffset %u; %s\n",
+			snprintf(buf, sizeof(buf), "checkpoint: redo %u/%08X; tli %u; nextxid %u;"
+			       "  nextoid %u; nextmulti %u; nextoffset %u; %s",
 			       checkpoint->redo.xlogid, checkpoint->redo.xrecoff,
 			       checkpoint->ThisTimeLineID, checkpoint->nextXid, 
 			       checkpoint->nextOid,
@@ -61,97 +107,253 @@ print_rmgr_xlog(XLogRecord *record, uint8 info, bool hideTimestamps)
 			       (info == XLOG_CHECKPOINT_SHUTDOWN) ?
 			       "shutdown" : "online");
 		
+		break;
 	}
-	else if (info == XLOG_NEXTOID)
+
+#if PG_VERSION_NUM >= 80300
+	case XLOG_NOOP:
+	{
+		snprintf(buf, sizeof(buf), "noop:");
+		break;
+	}
+#endif
+
+	case XLOG_NEXTOID:
 	{
 		Oid		nextOid;
 		
 		memcpy(&nextOid, XLogRecGetData(record), sizeof(Oid));
-		printf("nextOid: %u\n", nextOid);
+		snprintf(buf, sizeof(buf), "nextOid: %u", nextOid);
+		break;
 	}
-	else if (info == XLOG_SWITCH)
+
+	case XLOG_SWITCH:
 	{
-		printf("switch:\n");
+		snprintf(buf, sizeof(buf), "switch:");
+		break;
 	}
-	else if (info == XLOG_NOOP)
+
+#if PG_VERSION_NUM >= 90000
+	case XLOG_BACKUP_END:
 	{
-		printf("noop:\n");
+		snprintf(buf, sizeof(buf), "backup end:");
+		break;
 	}
+
+	case XLOG_PARAMETER_CHANGE:
+	{
+		snprintf(buf, sizeof(buf), "parameter change:");
+		break;
+	}
+#endif
+
+	default:
+		snprintf(buf, sizeof(buf), "unknown XLOG operation - %d.", info);
+		break;
+	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void
-print_rmgr_xact(XLogRecord *record, uint8 info, bool hideTimestamps)
+print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimestamps)
 {
-	if (info == XLOG_XACT_COMMIT)
+	char buf[1024];
+
+	memset(buf, 0, sizeof(buf));
+
+	switch (info)
 	{
+	case XLOG_XACT_COMMIT:
+		{
 		xl_xact_commit	xlrec;
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-		if(!hideTimestamps)
-			printf("commit: %u at %s\n", record->xl_xid,
-				   str_time(xlrec.xact_time));
-		else
-			printf("commit: %u\n", record->xl_xid);
-	}
-	else if (info == XLOG_XACT_ABORT)
-	{
+#if PG_VERSION_NUM >= 90000
+		snprintf(buf, sizeof(buf), "d/s:%d/%d commit at %s",
+			 xlrec.dbId, xlrec.tsId,
+			 str_time(xlrec.xact_time));
+#elif PG_VERSION_NUM >= 80300
+		snprintf(buf, sizeof(buf), "commit at %s",
+			 str_time(xlrec.xact_time));
+#else
+		snprintf(buf, sizeof(buf), "commit at %s",
+			 str_time(xlrec.xtime));
+#endif
+		}
+		break;
+
+	case XLOG_XACT_PREPARE:
+		snprintf(buf, sizeof(buf), "prepare");
+		break;
+
+	case XLOG_XACT_ABORT:
+		{
 		xl_xact_abort	xlrec;
+		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+		snprintf(buf, sizeof(buf), "abort at %s",
+#if PG_VERSION_NUM >= 80300
+			 str_time(xlrec.xact_time));
+#else
+			 str_time(xlrec.xtime));
+#endif
+		}
+		break;
+
+	case XLOG_XACT_COMMIT_PREPARED:
+		{
+		xl_xact_commit_prepared	xlrec;
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-		if(!hideTimestamps)
-			printf("abort: %u at %s\n", record->xl_xid,
-				   str_time(xlrec.xact_time));
-		else
-			printf("abort: %u\n", record->xl_xid);
+#if PG_VERSION_NUM >= 90000
+		snprintf(buf, sizeof(buf), "commit prepared xid:%d, dbid:%d, spcid:%d, commit at %s",
+			 xlrec.xid,
+			 xlrec.crec.dbId, xlrec.crec.tsId,
+			 str_time(xlrec.crec.xact_time));
+#elif PG_VERSION_NUM >= 80300
+		snprintf(buf, sizeof(buf), "commit prepared xid:%d, commit at %s",
+			 xlrec.xid,
+			 str_time(xlrec.crec.xact_time));
+#else
+		snprintf(buf, sizeof(buf), "commit prepared xid:%d, commit at %s",
+			 xlrec.xid,
+			 str_time(xlrec.crec.xtime));
+#endif
+		}
+		break;
+
+	case XLOG_XACT_ABORT_PREPARED:
+		{
+		xl_xact_commit_prepared	xlrec;
+
+		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+#if PG_VERSION_NUM >= 90000
+		snprintf(buf, sizeof(buf), "abort prepared xid:%d, dbid:%d, spcid:%d, commit at %s",
+			 xlrec.xid,
+			 xlrec.crec.dbId, xlrec.crec.tsId,
+			 str_time(xlrec.crec.xact_time));
+#elif PG_VERSION_NUM >= 80300
+		snprintf(buf, sizeof(buf), "abort prepared xid:%d, commit at %s",
+			 xlrec.xid,
+			 str_time(xlrec.crec.xact_time));
+#else
+		snprintf(buf, sizeof(buf), "abort prepared xid:%d, commit at %s",
+			 xlrec.xid,
+			 str_time(xlrec.crec.xtime));
+#endif
+		}
+		break;
+
+#if PG_VERSION_NUM >= 90000
+	case XLOG_XACT_ASSIGNMENT:
+		{
+		xl_xact_assignment	xlrec;
+
+		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+		snprintf(buf, sizeof(buf), "assignment xtop:%d, nsubxacts:%d",
+			 xlrec.xtop,
+			 xlrec.nsubxacts);
+		}
+		break;
+#endif
+
+	default:
+		snprintf(buf, sizeof(buf), "unknown XACT operation - %d.", info);
+		break;
 	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void
-print_rmgr_smgr(XLogRecord *record, uint8 info)
+print_rmgr_smgr(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
 	char spaceName[NAMEDATALEN];
 	char dbName[NAMEDATALEN];
 	char relName[NAMEDATALEN];
+	char buf[1024];
 
-	if (info == XLOG_SMGR_CREATE)
+	switch (info)
 	{
+	case XLOG_SMGR_CREATE:
+		{
 		xl_smgr_create	xlrec;
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 		getSpaceName(xlrec.rnode.spcNode, spaceName, sizeof(spaceName));
 		getDbName(xlrec.rnode.dbNode, dbName, sizeof(dbName));
 		getRelName(xlrec.rnode.relNode, relName, sizeof(relName));
-		printf("create rel: %s/%s/%s\n", 
+		snprintf(buf, sizeof(buf), "create rel: s/d/r:%s/%s/%s", 
 			spaceName, dbName, relName);
-	}
-	else if (info == XLOG_SMGR_TRUNCATE)
-	{
+		}
+		break;
+
+	case XLOG_SMGR_TRUNCATE:
+		{
 		xl_smgr_truncate	xlrec;
 
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 		getSpaceName(xlrec.rnode.spcNode, spaceName, sizeof(spaceName));
 		getDbName(xlrec.rnode.dbNode, dbName, sizeof(dbName));
 		getRelName(xlrec.rnode.relNode, relName, sizeof(relName));
-		printf("truncate rel: %s/%s/%s at block %u\n",
+		snprintf(buf, sizeof(buf), "truncate rel: s/d/r:%s/%s/%s at block %u",
 			 spaceName, dbName, relName, xlrec.blkno);
+		}
+		break;
+
+	default:
+		snprintf(buf, sizeof(buf), "unknown SMGR operation - %d.", info);
+		break;
 	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void
-print_rmgr_clog(XLogRecord *record, uint8 info)
+print_rmgr_clog(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
-	if (info == CLOG_ZEROPAGE)
+	char buf[1024];
+
+	int		pageno;
+	memcpy(&pageno, XLogRecGetData(record), sizeof(int));
+
+	switch (info)
 	{
-		int		pageno;
+	case CLOG_ZEROPAGE:
+		snprintf(buf, sizeof(buf), "zero clog page 0x%04x", pageno);
+		break;
 
-		memcpy(&pageno, XLogRecGetData(record), sizeof(int));
-		printf("zero clog page 0x%04x\n", pageno);
+	case CLOG_TRUNCATE:
+		snprintf(buf, sizeof(buf), "truncate clog page 0x%04x", pageno);
+		break;
+
+	default:
+		snprintf(buf, sizeof(buf), "unknown CLOG operation - %d.", info);
+		break;
 	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void
-print_rmgr_multixact(XLogRecord *record, uint8 info)
+print_rmgr_dbase(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "dbase");
+}
+
+void
+print_rmgr_tblspc(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "tblspc");
+}
+
+void
+print_rmgr_multixact(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	char buf[1024];
+
 	switch (info & XLOG_HEAP_OPMASK)
 	{
 		case XLOG_MULTIXACT_ZERO_OFF_PAGE:
@@ -159,7 +361,7 @@ print_rmgr_multixact(XLogRecord *record, uint8 info)
 			int		pageno;
 
 			memcpy(&pageno, XLogRecGetData(record), sizeof(int));
-			printf("zero offset page 0x%04x\n", pageno);
+			snprintf(buf, sizeof(buf), "zero offset page 0x%04x", pageno);
 			break;
 		}
 		case XLOG_MULTIXACT_ZERO_MEM_PAGE:
@@ -167,7 +369,7 @@ print_rmgr_multixact(XLogRecord *record, uint8 info)
 			int		pageno;
 
 			memcpy(&pageno, XLogRecGetData(record), sizeof(int));
-			printf("zero members page 0x%04x\n", pageno);
+			snprintf(buf, sizeof(buf), "zero members page 0x%04x", pageno);
 			break;
 		}
 		case XLOG_MULTIXACT_CREATE_ID:
@@ -175,21 +377,45 @@ print_rmgr_multixact(XLogRecord *record, uint8 info)
 			xl_multixact_create xlrec;
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-			printf("multixact create: %u off %u nxids %u\n",
+			snprintf(buf, sizeof(buf), "multixact create: %u off %u nxids %u",
 				   xlrec.mid,
 				   xlrec.moff,
 				   xlrec.nxids);
 			break;
 		}
+		default:
+			snprintf(buf, sizeof(buf), "unknown MULTIXACT operation - %d.", info & XLOG_HEAP_OPMASK);
+			break;
 	}
+
+	print_rmgr_record(cur, record, buf);
+}
+
+#if PG_VERSION_NUM >= 90000
+
+void
+print_rmgr_relmap(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "relmap");
 }
 
 void
-print_rmgr_heap2(XLogRecord *record, uint8 info)
+print_rmgr_standby(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "standby");
+}
+
+#endif 
+
+void
+print_rmgr_heap2(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
 	char spaceName[NAMEDATALEN];
 	char dbName[NAMEDATALEN];
 	char relName[NAMEDATALEN];
+	char buf[1024];
 
 	switch (info)
 	{
@@ -197,7 +423,7 @@ print_rmgr_heap2(XLogRecord *record, uint8 info)
 		{
 			xl_heap_freeze xlrec;
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
-			printf("freeze: ts %d db %d rel %d block %d cutoff_xid %d\n",
+			snprintf(buf, sizeof(buf), "freeze: ts %d db %d rel %d block %d cutoff_xid %d",
 				xlrec.node.spcNode,
 				xlrec.node.dbNode,
 				xlrec.node.relNode,
@@ -206,6 +432,7 @@ print_rmgr_heap2(XLogRecord *record, uint8 info)
 		}
 		break;
 
+#if PG_VERSION_NUM >= 80300
 		case XLOG_HEAP2_CLEAN:
 #if PG_VERSION_NUM < 90000
 		case XLOG_HEAP2_CLEAN_MOVE:
@@ -225,27 +452,58 @@ print_rmgr_heap2(XLogRecord *record, uint8 info)
 			if (total_off > xlrec.nredirected + xlrec.ndead)
 				nunused = total_off - (xlrec.nredirected + xlrec.ndead);
 
-			printf("clean%s: ts %s db %s rel %s block %u redirected %d dead %d unused %d\n",
-#if PG_VERSION_NUM < 90000
-			       info == XLOG_HEAP2_CLEAN_MOVE ? "_move" : "",
-#else
+#if PG_VERSION_NUM >= 90000
+			snprintf(buf, sizeof(buf), "clean%s: s/d/r:%s/%s/%s block:%u redirected/dead/unused:%d/%d/%d removed xid:%d",
 			       "",
+#else
+			snprintf(buf, sizeof(buf), "clean%s: s/d/r:%s/%s/%s block:%u redirected/dead/unused:%d/%d/%d",
+			       info == XLOG_HEAP2_CLEAN_MOVE ? "_move" : "",
 #endif
 			       spaceName, dbName, relName,
 			       xlrec.block,
-			       xlrec.nredirected, xlrec.ndead, nunused);
+			       xlrec.nredirected, xlrec.ndead, nunused
+#if PG_VERSION_NUM >= 90000
+			       , xlrec.latestRemovedXid
+#endif
+			       );
 			break;
 		}
 		break;
+
+#if PG_VERSION_NUM >= 90000
+		case XLOG_HEAP2_CLEANUP_INFO:
+		{
+			xl_heap_cleanup_info xlrec;
+
+			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+			getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
+			getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
+			getRelName(xlrec.node.relNode, relName, sizeof(relName));
+
+			snprintf(buf, sizeof(buf), "cleanup_info: s/d/r:%s/%s/%s removed xid:%d",
+				 spaceName, dbName, relName,
+				 xlrec.latestRemovedXid);
+		}
+		break;
+#endif
+
+#endif
+
+		default:
+			snprintf(buf, sizeof(buf), "unknown HEAP2 operation - %d.", info);
+			break;
 	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void
-print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
+print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 {
 	char spaceName[NAMEDATALEN];
 	char dbName[NAMEDATALEN];
 	char relName[NAMEDATALEN];
+	char buf[1024];
 
 	switch (info & XLOG_HEAP_OPMASK)
 	{
@@ -262,7 +520,7 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			if(statements)
 				printInsert((xl_heap_insert *) XLogRecGetData(record), record->xl_len - SizeOfHeapInsert - SizeOfHeapHeader, relName);
 
-			printf("insert%s: ts %s db %s rel %s block %u off %u\n",
+			snprintf(buf, sizeof(buf), "insert%s: s/d/r:%s/%s/%s blk/off:%u/%u",
 				   (info & XLOG_HEAP_INIT_PAGE) ? "(init)" : "",
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
@@ -270,12 +528,22 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			/* If backup block doesn't exist, dump rmgr data. */
 			if (!(record->xl_info & XLR_BKP_BLOCK_MASK))
 			{
+				char buf2[1024];
+
 				xl_heap_header *header = (xl_heap_header *)
 					(XLogRecGetData(record) + SizeOfHeapInsert);
-				printf("header: t_infomask2 %d t_infomask %d t_hoff %d\n",
+#if PG_VERSION_NUM >= 80300
+				snprintf(buf2, sizeof(buf2), " header: t_infomask2 %d t_infomask %d t_hoff %d",
 					header->t_infomask2,
 					header->t_infomask,
 					header->t_hoff);
+#else
+				snprintf(buf2, sizeof(buf2), " header: t_infomask %d t_hoff %d",
+					header->t_infomask,
+					header->t_hoff);
+#endif
+
+				strncat(buf, buf2, sizeof(buf));
 			}
 			else
 				printf("header: none\n");
@@ -294,7 +562,7 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			if(statements)
 				printf("DELETE FROM %s WHERE ...", relName);
 					
-			printf("delete%s: ts %s db %s rel %s block %u off %u\n",
+			snprintf(buf, sizeof(buf), "delete%s: s/d/r:%s/%s/%s block %u off %u",
 				   (info & XLOG_HEAP_INIT_PAGE) ? "(init)" : "",
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
@@ -302,7 +570,9 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			break;
 		}
 		case XLOG_HEAP_UPDATE:
+#if PG_VERSION_NUM >= 80300
 		case XLOG_HEAP_HOT_UPDATE:
+#endif
 		{
 			xl_heap_update xlrec;
 
@@ -314,8 +584,12 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			if(statements)
 				printUpdate((xl_heap_update *) XLogRecGetData(record), record->xl_len - SizeOfHeapUpdate - SizeOfHeapHeader, relName);
 
-			printf("%supdate%s: ts %s db %s rel %s block %u off %u to block %u off %u\n",
+			snprintf(buf, sizeof(buf), "%supdate%s: s/d/r:%s/%s/%s block %u off %u to block %u off %u",
+#if PG_VERSION_NUM >= 80300
 				   (info & XLOG_HEAP_HOT_UPDATE) ? "hot_" : "",
+#else
+				   "",
+#endif
 				   (info & XLOG_HEAP_INIT_PAGE) ? "(init)" : "",
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
@@ -333,7 +607,7 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
-			printf("move%s: ts %s db %s rel %s block %u off %u to block %u off %u\n",
+			snprintf(buf, sizeof(buf), "move%s: s/d/r:%s/%s/%s block %u off %u to block %u off %u",
 				   (info & XLOG_HEAP_INIT_PAGE) ? "(init)" : "",
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
@@ -351,7 +625,7 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.node.relNode, relName, sizeof(relName));
-			printf("newpage: ts %s db %s rel %s block %u\n", 
+			snprintf(buf, sizeof(buf), "newpage: s/d/r:%s/%s/%s block %u", 
 					spaceName, dbName, relName,
 				   xlrec.blkno);
 			break;
@@ -364,14 +638,14 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
-			printf("lock %s: ts %s db %s rel %s block %u off %u\n",
+			snprintf(buf, sizeof(buf), "lock %s: s/d/r:%s/%s/%s block %u off %u",
 				   xlrec.shared_lock ? "shared" : "exclusive",
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
 				   ItemPointerGetOffsetNumber(&xlrec.target.tid));
 			break;
 		}
-#ifdef XLOG_HEAP_INPLACE
+
 		case XLOG_HEAP_INPLACE:
 		{
 			xl_heap_inplace xlrec;
@@ -380,14 +654,25 @@ print_rmgr_heap(XLogRecord *record, uint8 info, bool statements)
 			getSpaceName(xlrec.target.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
-			printf("inplace: ts %s db %s rel %s block %u off %u\n", 
+			snprintf(buf, sizeof(buf), "inplace: s/d/r:%s/%s/%s block %u off %u", 
 					spaceName, dbName, relName,
 				   	ItemPointerGetBlockNumber(&xlrec.target.tid),
 				   	ItemPointerGetOffsetNumber(&xlrec.target.tid));
 			break;
 		}
-#endif
+
+		case XLOG_HEAP_INIT_PAGE:
+		{
+			snprintf(buf, sizeof(buf), "init page");
+			break;
+		}
+
+		default:
+			snprintf(buf, sizeof(buf), "unknown HEAP operation - %d.", (info & XLOG_HEAP_OPMASK));
+			break;
 	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 static bool
@@ -434,11 +719,12 @@ dump_xlog_btree_insert_meta(XLogRecord *record)
 }
 
 void
-print_rmgr_btree(XLogRecord *record, uint8 info)
+print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
 	char spaceName[NAMEDATALEN];
 	char dbName[NAMEDATALEN];
 	char relName[NAMEDATALEN];
+	char buf[1024];
 
 	switch (info)
 	{
@@ -451,7 +737,7 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
-			printf("insert_leaf: index %s/%s/%s tid %u/%u\n",
+			snprintf(buf, sizeof(buf), "insert_leaf: s/d/r:%s/%s/%s tid %u/%u",
 					spaceName, dbName, relName,
 				   	BlockIdGetBlockNumber(&xlrec.target.tid.ip_blkid),
 				   	xlrec.target.tid.ip_posid);
@@ -466,7 +752,7 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
-			printf("insert_upper: index %s/%s/%s tid %u/%u\n",
+			snprintf(buf, sizeof(buf), "insert_upper: s/d/r:%s/%s/%s tid %u/%u",
 					spaceName, dbName, relName,
 				   	BlockIdGetBlockNumber(&xlrec.target.tid.ip_blkid),
 				   	xlrec.target.tid.ip_posid);
@@ -485,17 +771,33 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 			datapos += SizeOfBtreeSplit;
+#if PG_VERSION_NUM >= 80300
 			getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.node.relNode, relName, sizeof(relName));
+#endif
 
-			printf("split_l%s: index %s/%s/%s rightsib %u\n",
+#if PG_VERSION_NUM >= 80300
+			printf("split_l%s: s/d/r:%s/%s/%s rightsib %u\n",
 				info == XLOG_BTREE_SPLIT_L_ROOT ? "_root" : "",
 				spaceName, dbName, relName, xlrec.rightsib);
+#else
+			printf("split_l%s: rightblk %u\n",
+				info == XLOG_BTREE_SPLIT_L_ROOT ? "_root" : "",
+				xlrec.rightblk);
+#endif
+
+#if PG_VERSION_NUM >= 80300
 			printf(" lsib %u rsib %u rnext %u level %u firstright %u\n",
 				xlrec.leftsib, xlrec.rightsib,
 				xlrec.rnext, xlrec.level, xlrec.firstright
 			);
+#else
+			printf(" lblk %u rblk %u level %u\n",
+				xlrec.leftblk, xlrec.rightblk,
+				xlrec.level
+			);
+#endif
 			/* downlinks */
 			if (xlrec.level > 0)
 			{
@@ -526,13 +828,21 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			xl_btree_split xlrec;
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+#if PG_VERSION_NUM >= 80300
 			getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.node.relNode, relName, sizeof(relName));
+#endif
 
-			printf("split_r%s: index %s/%s/%s leftsib %u\n", 
+#if PG_VERSION_NUM >= 80300
+			printf("split_r%s: s/d/r:%s/%s/%s leftsib %u\n", 
 					info == XLOG_BTREE_SPLIT_R_ROOT ? "_root" : "",
 					spaceName, dbName, relName, xlrec.leftsib);
+#else
+			printf("split_r%s: leftblk %u\n", 
+					info == XLOG_BTREE_SPLIT_R_ROOT ? "_root" : "",
+					xlrec.leftblk);
+#endif
 			break;
 		}
 		case XLOG_BTREE_DELETE:
@@ -543,7 +853,7 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			getSpaceName(xlrec.node.spcNode, spaceName, sizeof(spaceName));
 			getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.node.relNode, relName, sizeof(relName));
-			printf("delete: index %s/%s/%s block %u\n", 
+			snprintf(buf, sizeof(buf), "delete: s/d/r:%s/%s/%s block %u", 
 					spaceName, dbName,	relName,
 				   	xlrec.block);
 			break;
@@ -557,7 +867,7 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
-			printf("delete_page: index %s/%s/%s tid %u/%u deadblk %u\n",
+			snprintf(buf, sizeof(buf), "delete_page: s/d/r:%s/%s/%s tid %u/%u deadblk %u",
 					spaceName, dbName, relName,
 				   	BlockIdGetBlockNumber(&xlrec.target.tid.ip_blkid),
 				   	xlrec.target.tid.ip_posid,
@@ -577,7 +887,7 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			memcpy(&md, XLogRecGetData(record) + sizeof(xlrec),
 				sizeof(xl_btree_metadata));
 
-			printf("delete_page_meta: index %s/%s/%s tid %u/%u deadblk %u root %u/%u froot %u/%u\n", 
+			snprintf(buf, sizeof(buf), "delete_page_meta: s/d/r:%s/%s/%s tid %u/%u deadblk %u root %u/%u froot %u/%u", 
 					spaceName, dbName, relName,
 				   	BlockIdGetBlockNumber(&xlrec.target.tid.ip_blkid),
 				   	xlrec.target.tid.ip_posid,
@@ -594,7 +904,7 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			getDbName(xlrec.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.node.relNode, relName, sizeof(relName));
 
-			printf("newroot: index %s/%s/%s rootblk %u level %u\n", 
+			snprintf(buf, sizeof(buf), "newroot: s/d/r:%s/%s/%s rootblk %u level %u", 
 					spaceName, dbName, relName,
 				   	xlrec.rootblk, xlrec.level);
 			break;
@@ -608,14 +918,41 @@ print_rmgr_btree(XLogRecord *record, uint8 info)
 			getDbName(xlrec.target.node.dbNode, dbName, sizeof(dbName));
 			getRelName(xlrec.target.node.relNode, relName, sizeof(relName));
 
-			printf("delete_page_half: index %s/%s/%s tid %u/%u deadblk %u\n",
+			snprintf(buf, sizeof(buf), "delete_page_half: s/d/r:%s/%s/%s tid %u/%u deadblk %u",
 					spaceName, dbName, relName,
 				   	BlockIdGetBlockNumber(&xlrec.target.tid.ip_blkid),
 				   	xlrec.target.tid.ip_posid,
 				   	xlrec.deadblk);
 			break;
 		}
+
+#if PG_VERSION_NUM >= 90000
+		case XLOG_BTREE_VACUUM:
+		{
+			snprintf(buf, sizeof(buf), "vacuum: ");
+			break;
+		}
+
+		case XLOG_BTREE_REUSE_PAGE:
+		{
+			snprintf(buf, sizeof(buf), "reuse_page: ");
+			break;
+		}
+#endif
+
+		default:
+			snprintf(buf, sizeof(buf), "unkonwn BTREE operation - %d.", info);
+			break;
 	}
+
+	print_rmgr_record(cur, record, buf);
+}
+
+void
+print_rmgr_hash(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "hash");
 }
 
 /* copied from backend/access/gist/gistxlog.c */
@@ -689,8 +1026,17 @@ decodePageSplitRecord(PageSplitRecord *decoded, XLogRecord *record)
 }
 
 void
-print_rmgr_gist(XLogRecord *record, uint8 info)
+print_rmgr_gin(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "gin");
+}
+
+void
+print_rmgr_gist(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	print_rmgr_record(cur, record, "git");
+
 	switch (info)
 	{
 		case XLOG_GIST_PAGE_UPDATE:
@@ -770,5 +1116,12 @@ print_rmgr_gist(XLogRecord *record, uint8 info)
 			printf("page_delete: \n");
 			break;
 	}
+}
+
+void
+print_rmgr_seq(XLogRecPtr cur, XLogRecord *record, uint8 info)
+{
+	/* FIXME: need to be implemented. */
+	print_rmgr_record(cur, record, "seq");
 }
 

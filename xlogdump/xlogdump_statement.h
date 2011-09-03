@@ -1,3 +1,9 @@
+/*
+ * xlogdump_statement.h
+ *
+ * a collection of functions to build/re-produce (fake) SQL statements
+ * from xlog records.
+ */
 #ifndef __XLOGDUMP_STATEMENT__
 #define __XLOGDUMP_STATEMENT__
 

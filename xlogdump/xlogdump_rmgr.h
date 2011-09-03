@@ -1,3 +1,9 @@
+/*
+ * xlogdump_rmgr.h
+ *
+ * a collection of functions which print xlog records generated
+ * by each resource manager.
+ */
 #ifndef __XLOGDUMP_RMGR__
 #define __XLOGDUMP_RMGR__
 
@@ -44,14 +50,28 @@ typedef struct
     NewPage    *page;
 } PageSplitRecord;
 
-void print_rmgr_xlog(XLogRecord *, uint8, bool);
-void print_rmgr_xact(XLogRecord *, uint8, bool);
-void print_rmgr_smgr(XLogRecord *, uint8);
-void print_rmgr_clog(XLogRecord *, uint8);
-void print_rmgr_multixact(XLogRecord *, uint8);
-void print_rmgr_heap2(XLogRecord *, uint8);
-void print_rmgr_heap(XLogRecord *, uint8, bool);
-void print_rmgr_btree(XLogRecord *, uint8);
-void print_rmgr_gist(XLogRecord *, uint8);
+
+extern const char * const RM_names[RM_MAX_ID+1];
+
+void print_rmgr_xlog(XLogRecPtr, XLogRecord *, uint8, bool);
+void print_rmgr_xact(XLogRecPtr, XLogRecord *, uint8, bool);
+void print_rmgr_smgr(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_clog(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_dbase(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_tblspc(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_multixact(XLogRecPtr, XLogRecord *, uint8);
+
+#if PG_VERSION_NUM >= 90000
+void print_rmgr_relmap(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_standby(XLogRecPtr, XLogRecord *, uint8);
+#endif
+
+void print_rmgr_heap2(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_heap(XLogRecPtr, XLogRecord *, uint8, bool);
+void print_rmgr_btree(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_hash(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_gin(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_gist(XLogRecPtr, XLogRecord *, uint8);
+void print_rmgr_seq(XLogRecPtr, XLogRecord *, uint8);
 
 #endif /* __XLOGDUMP_RMGR__ */

@@ -3,6 +3,7 @@
  *
  * A tool for extracting data from the PostgreSQL's write ahead logs.
  *
+ * Satoshi Nagayasu <satoshi.nagayasu@gmail.com>
  * Diogo Biazus <diogob@gmail.com>
  * Based on the original xlogdump code by Tom Lane
  *

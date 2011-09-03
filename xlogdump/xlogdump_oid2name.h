@@ -1,3 +1,9 @@
+/*
+ * xlogdump_oid2name.h
+ *
+ * a collection of functions to get database object names from the oids
+ * by looking up the system catalog.
+ */
 #ifndef __XLOGDUMP_OID2NAME__
 #define __XLOGDUMP_OID2NAME__
 
