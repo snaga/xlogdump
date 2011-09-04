@@ -4,8 +4,8 @@
  * a collection of functions which print xlog records generated
  * by each resource manager.
  */
-#ifndef __XLOGDUMP_RMGR__
-#define __XLOGDUMP_RMGR__
+#ifndef __XLOGDUMP_RMGR_H__
+#define __XLOGDUMP_RMGR_H__
 
 #include "postgres.h"
 #include "access/gist_private.h"
@@ -74,4 +74,4 @@ void print_rmgr_gin(XLogRecPtr, XLogRecord *, uint8);
 void print_rmgr_gist(XLogRecPtr, XLogRecord *, uint8);
 void print_rmgr_seq(XLogRecPtr, XLogRecord *, uint8);
 
-#endif /* __XLOGDUMP_RMGR__ */
+#endif /* __XLOGDUMP_RMGR_H__ */

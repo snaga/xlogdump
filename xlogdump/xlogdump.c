@@ -1,19 +1,30 @@
-/*-------------------------------------------------------------------------
- *
+/*
  * xlogdump.c
- *		Simple utility for dumping PostgreSQL XLOG files.
  *
- * Usage: xlogdump [options] xlogfile [ xlogfile ... ] >output
+ * A tool for extracting data from the PostgreSQL's write ahead logs.
  *
+ * Satoshi Nagayasu <satoshi.nagayasu@gmail.com>
+ * Diogo Biazus <diogob@gmail.com>
+ * Based on the original xlogdump code by Tom Lane
  *
- * Portions Copyright (c) 1996-2004, PostgreSQL Global Development Group
- * Portions Copyright (c) 1994, Regents of the University of California
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose, without fee, and without a written agreement
+ * is hereby granted, provided that the above copyright notice and this
+ * paragraph and the following two paragraphs appear in all copies.
  *
- * $PostgreSQL$
+ * IN NO EVENT SHALL THE AUTHOR OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+ * DOCUMENTATION, EVEN IF THE AUTHOR OR DISTRIBUTORS HAVE BEEN ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- *-------------------------------------------------------------------------
+ * THE AUTHOR AND DISTRIBUTORS SPECIFICALLY DISCLAIMS ANY WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ * ON AN "AS IS" BASIS, AND THE AUTHOR AND DISTRIBUTORS HAS NO OBLIGATIONS TO
+ * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+ *
  */
-
 #include "postgres.h"
 
 #include <fcntl.h>
@@ -593,9 +604,9 @@ dumpXLog(char* fname)
 static void
 help(void)
 {
-	printf("xlogdump ... \n\n");
+	printf("xlogdump version %s\n\n", VERSION_STR);
 	printf("Usage:\n");
-	printf("  xlogdump [OPTION]... [segment file]\n");
+	printf("  xlogdump [OPTION]... [segment file(s)]\n");
 	printf("\nOptions controlling the output content:\n");
 	printf("  -r, --rmname=OPERATION    Outputs only the transaction log records\n"); 
 	printf("                            containing the specified operation\n");
@@ -609,7 +620,7 @@ help(void)
 	printf("  -p, --port=PORT           database server port number\n");
 	printf("  -U, --username=NAME       connect as specified database user\n\n");
 	printf("  -?, --help                Show this help.\n\n");
-	printf("Report bugs to <diogob@gmail.com>.\n");
+	printf("Report bugs to <satoshi.nagayasu@gmail.com>.\n");
 	exit(0);
 }
 

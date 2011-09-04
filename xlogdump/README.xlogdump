@@ -1,36 +1,56 @@
-/*
- * xlogdump
- *
- * A tool for extracting data from the PostgreSQL's write ahead logs.
- *
- * Satoshi Nagayasu <satoshi.nagayasu@gmail.com>
- * Diogo Biazus <diogob@gmail.com>
- * Based on the original xlogdump code by Tom Lane
- *
- * Permission to use, copy, modify, and distribute this software and its
- * documentation for any purpose, without fee, and without a written agreement
- * is hereby granted, provided that the above copyright notice and this
- * paragraph and the following two paragraphs appear in all copies.
- *
- * IN NO EVENT SHALL THE AUTHOR OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
- * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
- * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
- * DOCUMENTATION, EVEN IF THE AUTHOR OR DISTRIBUTORS HAVE BEEN ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- * THE AUTHOR AND DISTRIBUTORS SPECIFICALLY DISCLAIMS ANY WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
- * ON AN "AS IS" BASIS, AND THE AUTHOR AND DISTRIBUTORS HAS NO OBLIGATIONS TO
- * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
- *
- */
 
-How to install:
-  Place these files in a directory called 'xlogdump' under 'contrib' in the PostgreSQL source tree. Then run:
+xlogdump README
+
+
+What's `xlogdump'?
+==================
+
+  A tool for extracting data from the PostgreSQL's write ahead logs.
+
+
+How to install
+==============
+
+  Place these files in a directory called 'xlogdump' under 'contrib'
+  in the PostgreSQL source tree. Then run:
   
     make
     make install
+
+  Or specify `top_builddir' variable when running make:
+
+    make top_builddir=/path/to/postgresql-9.0.x
+    make top_builddir=/path/to/postgresql-9.0.x install
+
    
-Documentation:
-  Read the doc/index.hml for a complete help and examples.
+Usage
+=====
+
+Usage:
+  xlogdump [OPTION]... [segment file(s)]
+
+Options controlling the output content:
+  -r, --rmname=OPERATION    Outputs only the transaction log records
+                            containing the specified operation
+  -t, --transactions        Outputs only transaction info: the xid,
+                            total length and status of each transaction
+  -s, --statements          Tries to build fake statements that produce the
+                            physical changes found within the xlog segments
+  -T, --hide-timestamps     Do not print timestamps.
+
+Connection options:
+  -h, --host=HOST           database server host or socket directory
+  -p, --port=PORT           database server port number
+  -U, --username=NAME       connect as specified database user
+
+  -?, --help                Show this help.
+
+
+Bug report
+==========
+
+  Any bug reports and/or comments are welcome. Please send them to the
+  author:
+
+    Satoshi Nagayasu <satoshi.nagayasu@gmail.com>
+

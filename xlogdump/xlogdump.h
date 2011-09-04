@@ -1,17 +1,12 @@
-/*-------------------------------------------------------------------------
- *
+/*
  * xlogdump.h
- *		Common header file for the xlogdump utility.
  *
- *
- *
- * Portions Copyright (c) 1996-2004, PostgreSQL Global Development Group
- * Portions Copyright (c) 1994, Regents of the University of California
- *
- * $PostgreSQL$
- *
- *-------------------------------------------------------------------------
+ * Common header file for the xlogdump utility.
  */
+#ifndef __XLOGDUMP_H__
+#define __XLOGDUMP_H__
+
+#define VERSION_STR "0.4.0"
 
 struct transInfo
 {
@@ -31,3 +26,4 @@ static const char * const status_names[3] = {
 	"ABORTED     "
 };
 
+#endif /* __XLOGDUMP_H__ */
