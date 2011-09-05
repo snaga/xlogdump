@@ -64,7 +64,7 @@ static uint32		readRecordBufSize = 0;
 static bool 		transactions = false; /* when true we just aggregate transaction info */
 static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
 static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
-static char 		rmname[5] = "ALL  "; /* name of the operation we want to filter on the xlog */
+static char 		rmname[] = "ALL  "; /* name of the operation we want to filter on the xlog */
 const char 		*pghost = NULL; /* connection host */
 const char 		*pgport = NULL; /* connection port */
 const char 		*username = NULL; /* connection username */
@@ -661,7 +661,7 @@ main(int argc, char** argv)
 				hideTimestamps = true;
 				break;
 			case 'r':			/* output only rmname passed */
-				sprintf(rmname, "%-5s", optarg);
+				snprintf(rmname, sizeof (rmname), "%-5s", optarg);
 				break;
 			case 'h':			/* host for tranlsting oids */
 				pghost = optarg;
