@@ -13,7 +13,7 @@ PGXS := $(shell pg_config --pgxs)
 include $(PGXS)
 else
 subdir = contrib/xlogdump
-top_builddir = /home/snaga/pgsql/postgresql-9.0.1
+top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 endif
