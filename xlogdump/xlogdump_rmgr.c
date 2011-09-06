@@ -1040,12 +1040,25 @@ print_rmgr_gist(XLogRecPtr cur, XLogRecord *record, uint8 info)
 	switch (info)
 	{
 		case XLOG_GIST_PAGE_UPDATE:
+#if PG_VERSION_NUM < 90100
 		case XLOG_GIST_NEW_ROOT:
+#endif
 			{
 				int i;
 				PageUpdateRecord rec;
 				decodePageUpdateRecord(&rec, record);
 
+#if PG_VERSION_NUM >= 90100
+				printf("%s: rel=(%u/%u/%u) blk=%u leftchild=%d add=%d ntodelete=%d\n",
+					info == XLOG_GIST_PAGE_UPDATE ? "page_update" : "new_root",
+					rec.data->node.spcNode, rec.data->node.dbNode,
+					rec.data->node.relNode,
+					rec.data->blkno,
+					rec.data->leftchild,
+					rec.len,
+					rec.data->ntodelete
+				);
+#else
 				printf("%s: rel=(%u/%u/%u) blk=%u key=(%d,%d) add=%d ntodelete=%d\n",
 					info == XLOG_GIST_PAGE_UPDATE ? "page_update" : "new_root",
 					rec.data->node.spcNode, rec.data->node.dbNode,
@@ -1056,6 +1069,7 @@ print_rmgr_gist(XLogRecPtr cur, XLogRecord *record, uint8 info)
 					rec.len,
 					rec.data->ntodelete
 				);
+#endif
 				for (i = 0; i < rec.len; i++)
 				{
 					printf("  itup[%d] points (%d, %d)\n",
@@ -1077,11 +1091,18 @@ print_rmgr_gist(XLogRecPtr cur, XLogRecord *record, uint8 info)
 				PageSplitRecord rec;
 
 				decodePageSplitRecord(&rec, record);
+#if PG_VERSION_NUM >= 90100
+				printf("page_split: orig %u leftchild %d\n",
+					rec.data->origblkno,
+					rec.data->leftchild
+				);
+#else
 				printf("page_split: orig %u key (%d,%d)\n",
 					rec.data->origblkno,
 					ItemPointerGetBlockNumber(&rec.data->key),
 					rec.data->key.ip_posid
 				);
+#endif
 				for (i = 0; i < rec.data->npage; i++)
 				{
 					printf("  page[%d] block %u tuples %d\n",
@@ -1104,11 +1125,13 @@ print_rmgr_gist(XLogRecPtr cur, XLogRecord *record, uint8 info)
 				}
 			}
 			break;
+#if PG_VERSION_NUM < 90100
 		case XLOG_GIST_INSERT_COMPLETE:
 			{
 				printf("insert_complete: \n");
 			}
 			break;
+#endif
 		case XLOG_GIST_CREATE_INDEX:
 			printf("create_index: \n");
 			break;
