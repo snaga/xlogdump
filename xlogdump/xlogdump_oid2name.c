@@ -24,6 +24,13 @@ static Oid 		lastDbOid;
 static Oid 		lastSpcOid;
 static Oid 		lastRelOid;
 
+#define PQclear(r) { \
+	if (r) { \
+		PQclear(r); \
+		res = NULL; \
+	} \
+}
+
 /*
  * Open a database connection
  */
@@ -33,7 +40,6 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 	char	*password = NULL;
 	char	*password_prompt = NULL;
 	bool	need_pass;
-	PGconn  *conn = NULL;
 
 	pghost = strdup(host);
 	pgport = strdup(port);
@@ -65,7 +71,9 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 		}
 	} while (need_pass);
 
-	pgpass = strdup(password);
+	if (password) {
+	    pgpass = strdup(password);
+	}
 
 	/* Check to see that the backend connection was successfully made */
 	if (PQstatus(conn) == CONNECTION_BAD)
