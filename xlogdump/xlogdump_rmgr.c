@@ -136,7 +136,11 @@ print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 #if PG_VERSION_NUM >= 90000
 	case XLOG_BACKUP_END:
 	{
-		snprintf(buf, sizeof(buf), "backup end:");
+		XLogRecPtr startpoint;
+
+		memcpy(&startpoint, XLogRecGetData(record), sizeof(XLogRecPtr));
+		snprintf(buf, sizeof(buf), "backup end: started at %X/%X.",
+			 startpoint.xlogid, startpoint.xrecoff);
 		break;
 	}
 
