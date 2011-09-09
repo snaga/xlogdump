@@ -52,14 +52,14 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 	{
 		int	i, rows = 0, fieldSize = 0;
 		
-		rows = relid2attr_begin(relName);
+		rows = relname2attr_begin(relName);
 
 		for(i = 0; i < rows; i++)
 		{
 			char attname[NAMEDATALEN];
 			Oid atttypid;
 
-			relid2attr_fetch(i, attname, &atttypid);
+			relname2attr_fetch(i, attname, &atttypid);
 
 			printf("%s%s", (i == 0 ? "" : ", "), attname);
 		}
@@ -72,7 +72,7 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 			char attname[NAMEDATALEN];
 			Oid atttypid;
 
-			relid2attr_fetch(i, attname, &atttypid);
+			relname2attr_fetch(i, attname, &atttypid);
 
 			/* is the attribute value null? */
 			if((hhead.t_infomask & HEAP_HASNULL) && (att_isnull(i, nullBitMap)))
@@ -95,7 +95,7 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 		}
 		printf(");\n");
 
-		relid2attr_end();
+		relname2attr_end();
 	}
 }
 
@@ -134,7 +134,7 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 	{
 		int	i, rows = 0, fieldSize = 0;
 		
-		rows = relid2attr_begin(relName);
+		rows = relname2attr_begin(relName);
 
 		offset = 0;
 
@@ -143,7 +143,7 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 			char attname[NAMEDATALEN];
 			Oid atttypid;
 
-			relid2attr_fetch(i, attname, &atttypid);
+			relname2attr_fetch(i, attname, &atttypid);
 
 			printf("%s%s = ", (i == 0 ? "" : ", "), attname);
 
@@ -163,6 +163,8 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 			}
 		}
 		printf(" WHERE ... ;\n");
+
+		relname2attr_end();
 	}
 }
 

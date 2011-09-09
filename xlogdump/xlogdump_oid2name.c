@@ -297,7 +297,7 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 
 
 int
-relid2attr_begin(const char *relname)
+relname2attr_begin(const char *relname)
 {
 	resetPQExpBuffer(dbQry);
 	PQclear(res);
@@ -316,7 +316,7 @@ relid2attr_begin(const char *relname)
 }
 
 int
-relid2attr_fetch(int i, char *attname, Oid *atttypid)
+relname2attr_fetch(int i, char *attname, Oid *atttypid)
 {
 	snprintf(attname, NAMEDATALEN, PQgetvalue(res, i, 0));
 	*atttypid = atoi( PQgetvalue(res, i, 1) );
@@ -324,7 +324,7 @@ relid2attr_fetch(int i, char *attname, Oid *atttypid)
 }
 
 void
-relid2attr_end()
+relname2attr_end()
 {
 	resetPQExpBuffer(dbQry);
 	PQclear(res);
