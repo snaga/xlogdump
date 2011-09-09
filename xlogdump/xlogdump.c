@@ -65,9 +65,6 @@ static bool 		transactions = false; /* when true we just aggregate transaction i
 static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
 static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
 static char 		rmname[] = "ALL  "; /* name of the operation we want to filter on the xlog */
-const char 		*pghost = NULL; /* connection host */
-const char 		*pgport = NULL; /* connection port */
-const char 		*username = NULL; /* connection username */
 
 /* Buffers to hold objects names */
 static char 		spaceName[NAMEDATALEN] = "";
@@ -607,19 +604,22 @@ help(void)
 	printf("xlogdump version %s\n\n", VERSION_STR);
 	printf("Usage:\n");
 	printf("  xlogdump [OPTION]... [segment file(s)]\n");
-	printf("\nOptions controlling the output content:\n");
+	printf("\nOptions:\n");
 	printf("  -r, --rmname=OPERATION    Outputs only the transaction log records\n"); 
 	printf("                            containing the specified operation\n");
 	printf("  -t, --transactions        Outputs only transaction info: the xid,\n");
 	printf("                            total length and status of each transaction\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
 	printf("                            physical changes found within the xlog segments\n");
+	printf("  -n, --oid2name            Show object names with looking up the system catalogs.\n");
 	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
-	printf("\nConnection options:\n");
+	printf("  -?, --help                Show this help.\n");
+	printf("\n");
+	printf("oid2name supplimental options:\n");
 	printf("  -h, --host=HOST           database server host or socket directory\n");
 	printf("  -p, --port=PORT           database server port number\n");
-	printf("  -U, --username=NAME       connect as specified database user\n\n");
-	printf("  -?, --help                Show this help.\n\n");
+	printf("  -U, --user=NAME           database user name to connect\n");
+	printf("\n");
 	printf("Report bugs to <satoshi.nagayasu@gmail.com>.\n");
 	exit(0);
 }
@@ -628,15 +628,20 @@ int
 main(int argc, char** argv)
 {
 	int	c, i, optindex;
+	bool oid2name = false;
+	char *pghost = NULL; /* connection host */
+	char *pgport = NULL; /* connection port */
+	char *pguser = NULL; /* connection username */
 
 	static struct option long_options[] = {
 		{"transactions", no_argument, NULL, 't'},
 		{"statements", no_argument, NULL, 's'},
 		{"hide-timestamps", no_argument, NULL, 'T'},	
 		{"rmname", required_argument, NULL, 'r'},
+		{"oid2name", no_argument, NULL, 'n'},
 		{"host", required_argument, NULL, 'h'},
 		{"port", required_argument, NULL, 'p'},
-		{"username", required_argument, NULL, 'U'},
+		{"user", required_argument, NULL, 'U'},
 		{"help", no_argument, NULL, '?'},
 		{NULL, 0, NULL, 0}
 	};
@@ -644,7 +649,7 @@ main(int argc, char** argv)
 	if (argc == 1 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-?"))
 		help();
 
-	while ((c = getopt_long(argc, argv, "stTr:h:p:U:",
+	while ((c = getopt_long(argc, argv, "stTnr:h:p:U:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -660,6 +665,9 @@ main(int argc, char** argv)
 			case 'T':			/* hide timestamps (used for testing) */
 				hideTimestamps = true;
 				break;
+			case 'n':
+				oid2name = true;
+				break;
 			case 'r':			/* output only rmname passed */
 				snprintf(rmname, sizeof (rmname), "%-5s", optarg);
 				break;
@@ -670,7 +678,7 @@ main(int argc, char** argv)
 				pgport = optarg;
 				break;
 			case 'U':			/* username for translating oids */
-				username = optarg;
+				pguser = optarg;
 				break;
 			default:
 				fprintf(stderr, "Try \"xlogdump --help\" for more information.\n");
@@ -690,9 +698,16 @@ main(int argc, char** argv)
 		exit(1);
 	}
 
-	if(pghost)
+	if (oid2name)
 	{
-		if ( !DBConnect(pghost, pgport, "template1", username) )
+		if (!pghost)
+			pghost = strdup("localhost");
+		if (!pgport)
+			pgport = strdup("5432");
+		if (!pguser)
+			pguser = getenv("USER");
+
+		if ( !DBConnect(pghost, pgport, "template1", pguser) )
 			exit_gracefuly(1);
 	}
 

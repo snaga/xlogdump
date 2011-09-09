@@ -48,11 +48,11 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 	printf("INSERT INTO \"%s\" (", relName);
 	
 	// Get relation field names and types
-	if (do_oid2name())
+	if (oid2name_enabled())
 	{
 		int	i, rows = 0, fieldSize = 0;
 		
-		rows = relid2attr_begin();
+		rows = relid2attr_begin(relName);
 
 		for(i = 0; i < rows; i++)
 		{
@@ -130,11 +130,11 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 	printf("UPDATE \"%s\" SET ", relName);
 
 	// Get relation field names and types
-	if(do_oid2name())
+	if (oid2name_enabled())
 	{
 		int	i, rows = 0, fieldSize = 0;
 		
-		rows = relid2attr_begin();
+		rows = relid2attr_begin(relName);
 
 		offset = 0;
 

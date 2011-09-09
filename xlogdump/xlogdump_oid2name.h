@@ -16,11 +16,11 @@ char *getSpaceName(uint32, char *, size_t);
 char *getDbName(uint32, char *, size_t);
 char *getRelName(uint32, char *, size_t);
 
-int relid2attr_begin(void);
+int relid2attr_begin(const char *);
 int relid2attr_fetch(int, char *, Oid *);
 void relid2attr_end(void);
 
-bool do_oid2name(void);
+bool oid2name_enabled(void);
 
 void DBDisconnect(void);
 

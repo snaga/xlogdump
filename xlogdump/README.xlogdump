@@ -29,21 +29,21 @@ Usage
 Usage:
   xlogdump [OPTION]... [segment file(s)]
 
-Options controlling the output content:
+Options:
   -r, --rmname=OPERATION    Outputs only the transaction log records
                             containing the specified operation
   -t, --transactions        Outputs only transaction info: the xid,
                             total length and status of each transaction
   -s, --statements          Tries to build fake statements that produce the
                             physical changes found within the xlog segments
+  -n, --oid2name            Show object names with looking up the system catalogs.
   -T, --hide-timestamps     Do not print timestamps.
+  -?, --help                Show this help.
 
-Connection options:
+oid2name supplimental options:
   -h, --host=HOST           database server host or socket directory
   -p, --port=PORT           database server port number
-  -U, --username=NAME       connect as specified database user
-
-  -?, --help                Show this help.
+  -U, --user=NAME           database user name to connect
 
 
 Bug report

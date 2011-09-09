@@ -19,10 +19,85 @@ static char *pgport = NULL;
 static char *pguser = NULL;
 static char *pgpass = NULL;
 
-/* Oids used for checking if we need to search for an objects name or if we can use the last one */
-static Oid 		lastDbOid;
-static Oid 		lastSpcOid;
-static Oid 		lastRelOid;
+/*
+ * Structure for the linked-list to hold oid-name lookup cache.
+ */
+struct oid2name_t {
+	Oid oid;
+	char *name;
+	struct oid2name_t *next;
+};
+
+/*
+ * Head element of the linked-list.
+ */
+struct oid2name_t *oid2name_table = NULL;
+
+static char *cache_get(Oid);
+static struct oid2name_t *cache_put(Oid, char *);
+
+/*
+ * cache_get()
+ *
+ * looks up the oid-name mapping cache table. If not found, returns NULL.
+ */
+static char *
+cache_get(Oid oid)
+{
+	struct oid2name_t *curr = oid2name_table;
+
+	while (curr!=NULL)
+	{
+	  //		printf("DEBUG: find %d %s\n", curr->oid, curr->name);
+
+		if (curr->oid == oid)
+			return curr->name;
+
+		curr = curr->next;
+	}
+
+	return NULL;
+}
+
+/*
+ * cache_put()
+ *
+ * puts a new entry to the tail of the oid-name mapping cache table.
+ */
+static struct oid2name_t *
+cache_put(Oid oid, char *name)
+{
+	struct oid2name_t *curr = oid2name_table;
+
+	if (!curr)
+	{
+		curr = (struct oid2name_t *)malloc( sizeof(struct oid2name_t) );
+		memset(curr, 0, sizeof(struct oid2name_t));
+
+		curr->oid = oid;
+		curr->name = strdup(name);
+
+		oid2name_table = curr;
+
+		//		printf("DEBUG: put %d %s\n", curr->oid, curr->name);
+
+		return curr;
+	}
+
+	while (curr->next!=NULL)
+	{
+		curr = curr->next;
+	}
+
+	curr->next = (struct oid2name_t *)malloc( sizeof(struct oid2name_t) );
+	memset(curr->next, 0, sizeof(struct oid2name_t));
+	curr->next->oid = oid;
+	curr->next->name = strdup(name);
+
+	//	printf("DEBUG: put %d %s\n", curr->next->oid, curr->next->name);
+
+	return curr->next;
+}
 
 /*
  * Open a database connection
@@ -33,7 +108,6 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 	char	*password = NULL;
 	char	*password_prompt = NULL;
 	bool	need_pass;
-	PGconn  *conn = NULL;
 
 	pghost = strdup(host);
 	pgport = strdup(port);
@@ -65,7 +139,8 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 		}
 	} while (need_pass);
 
-	pgpass = strdup(password);
+	if (password)
+		pgpass = strdup(password);
 
 	/* Check to see that the backend connection was successfully made */
 	if (PQstatus(conn) == CONNECTION_BAD)
@@ -88,9 +163,17 @@ char *
 getSpaceName(uint32 space, char *buf, size_t buflen)
 {
 	resetPQExpBuffer(dbQry);
-	if((conn) && (lastSpcOid != space))
+
+	if (cache_get(space))
+	{
+		snprintf(buf, buflen, "%s", cache_get(space));
+		return buf;
+	}
+
+	if (conn)
 	{
 		PQclear(res);
+		//		printf("DEBUG: getSpaceName: SELECT spcname FROM pg_tablespace WHERE oid = %i\n", space);
 		appendPQExpBuffer(dbQry, "SELECT spcname FROM pg_tablespace WHERE oid = %i", space);
 		res = PQexec(conn, dbQry->data);
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -100,15 +183,14 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
 			return NULL;
 		}
 		resetPQExpBuffer(dbQry);
-		lastSpcOid = space;
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
+			//			printf("DEBUG: getSpaceName: spcname = %s\n", buf);
+			cache_put(space, buf);
 			return buf;
 		}
 	}
-	else if(lastSpcOid == space)
-		return buf;
 
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", space);
@@ -124,7 +206,14 @@ char *
 getDbName(uint32 db, char *buf, size_t buflen)
 {
 	resetPQExpBuffer(dbQry);
-	if((conn) && (lastDbOid != db))
+
+	if (cache_get(db))
+	{
+		snprintf(buf, buflen, "%s", cache_get(db));
+		return buf;
+	}
+
+	if (conn)
 	{	
 		PQclear(res);
 		appendPQExpBuffer(dbQry, "SELECT datname FROM pg_database WHERE oid = %i", db);
@@ -136,13 +225,15 @@ getDbName(uint32 db, char *buf, size_t buflen)
 			return NULL;
 		}
 		resetPQExpBuffer(dbQry);
-		lastDbOid = db;
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
 
+			cache_put(db, buf);
+
 			// Database changed makes new connection
-			PQfinish(lastDbConn);
+			if (lastDbConn)
+				PQfinish(lastDbConn);
 
 			lastDbConn = PQsetdbLogin(pghost,
 						  pgport,
@@ -155,8 +246,6 @@ getDbName(uint32 db, char *buf, size_t buflen)
 			return buf;
 		}
 	}
-	else if(lastDbOid == db)
-		return buf;
 
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", db);
@@ -172,7 +261,14 @@ char *
 getRelName(uint32 relid, char *buf, size_t buflen)
 {
 	resetPQExpBuffer(dbQry);
-	if((conn) && (lastDbConn) && (lastRelOid != relid))
+
+	if (cache_get(relid))
+	{
+		snprintf(buf, buflen, "%s", cache_get(relid));
+		return buf;
+	}
+
+	if (conn && lastDbConn)
 	{
 		PQclear(res);
 		/* Try the relfilenode and oid just in case the filenode has changed
@@ -186,17 +282,13 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 			return NULL;
 		}
 		resetPQExpBuffer(dbQry);
-		lastRelOid = relid;
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
-			/* copy the oid since it could be different from relfilenode */
-			lastRelOid = (uint32) atoi(PQgetvalue(res, 0, 1));
+			cache_put(relid, buf);
 			return buf;
 		}
 	}
-	else if(lastRelOid == relid)
-		return buf;
 	
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", relid);
@@ -205,12 +297,12 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 
 
 int
-relid2attr_begin(void)
+relid2attr_begin(const char *relname)
 {
 	resetPQExpBuffer(dbQry);
 	PQclear(res);
 
-	appendPQExpBuffer(dbQry, "SELECT attname, atttypid from pg_attribute where attnum > 0 AND attrelid = '%i' ORDER BY attnum", lastRelOid);
+	appendPQExpBuffer(dbQry, "SELECT attname, atttypid FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
 	res = PQexec(lastDbConn, dbQry->data);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
@@ -239,9 +331,9 @@ relid2attr_end()
 }
 
 bool
-do_oid2name(void)
+oid2name_enabled(void)
 {
-	return (conn && lastDbConn);
+	return (conn!=NULL);
 }
 
 void
