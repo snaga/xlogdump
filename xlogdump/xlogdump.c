@@ -611,7 +611,8 @@ help(void)
 	printf("                            total length and status of each transaction\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
 	printf("                            physical changes found within the xlog segments\n");
-	printf("  -n, --oid2name            Show object names with looking up the system catalogs.\n");
+	printf("  -n, --oid2name            Show object names instead of OIDs with looking up\n");
+	printf("                            the system catalogs.\n");
 	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
 	printf("  -?, --help                Show this help.\n");
 	printf("\n");
