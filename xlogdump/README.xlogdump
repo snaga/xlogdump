@@ -30,12 +30,29 @@ Usage:
   xlogdump [OPTION]... [segment file(s)]
 
 Options:
-  -r, --rmname=OPERATION    Outputs only the transaction log records
-                            containing the specified operation
+  -r, --rmid=RMID           Outputs only the transaction log records
+                            containing the specified operation.
+                            RMID:Resource Manager
+                               0:XLOG
+                               1:Transaction
+                               2:Storage
+                               3:CLOG
+                               4:Database
+                               5:Tablespace
+                               6:MultiXact
+                               7:RelMap
+                               8:Standby
+                               9:Heap2
+                              10:Heap
+                              11:Btree
+                              12:Hash
+                              13:Gin
+                              14:Gist
+                              15:Sequence
   -t, --transactions        Outputs only transaction info: the xid,
-                            total length and status of each transaction
+                            total length and status of each transaction.
   -s, --statements          Tries to build fake statements that produce the
-                            physical changes found within the xlog segments
+                            physical changes found within the xlog segments.
   -n, --oid2name            Show object names instead of OIDs with looking up
                             the system catalogs.
   -T, --hide-timestamps     Do not print timestamps.

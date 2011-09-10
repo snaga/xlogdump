@@ -64,7 +64,7 @@ static uint32		readRecordBufSize = 0;
 static bool 		transactions = false; /* when true we just aggregate transaction info */
 static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
 static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
-static char 		rmname[] = "ALL  "; /* name of the operation we want to filter on the xlog */
+static int 		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
 
 /* Buffers to hold objects names */
 static char 		spaceName[NAMEDATALEN] = "";
@@ -365,7 +365,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 	uint8	info = record->xl_info & ~XLR_INFO_MASK;
 
 	/* check if the user wants a specific rmid */
-	if(strcmp("ALL  ", rmname) && strcasecmp(RM_names[record->xl_rmid], rmname))
+	if (rmid>=0 && record->xl_rmid!=rmid)
 		return;
 
 #ifdef NOT_USED
@@ -601,16 +601,21 @@ dumpXLog(char* fname)
 static void
 help(void)
 {
+	int i;
+
 	printf("xlogdump version %s\n\n", VERSION_STR);
 	printf("Usage:\n");
 	printf("  xlogdump [OPTION]... [segment file(s)]\n");
 	printf("\nOptions:\n");
-	printf("  -r, --rmname=OPERATION    Outputs only the transaction log records\n"); 
-	printf("                            containing the specified operation\n");
+	printf("  -r, --rmid=RMID           Outputs only the transaction log records\n"); 
+	printf("                            containing the specified operation.\n");
+	printf("                            RMID:Resource Manager\n");
+	for (i=0 ; i<RM_MAX_ID+1 ; i++)
+		printf("                              %2d:%s\n", i, RM_names[i]);
 	printf("  -t, --transactions        Outputs only transaction info: the xid,\n");
-	printf("                            total length and status of each transaction\n");
+	printf("                            total length and status of each transaction.\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
-	printf("                            physical changes found within the xlog segments\n");
+	printf("                            physical changes found within the xlog segments.\n");
 	printf("  -n, --oid2name            Show object names instead of OIDs with looking up\n");
 	printf("                            the system catalogs.\n");
 	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
@@ -638,7 +643,7 @@ main(int argc, char** argv)
 		{"transactions", no_argument, NULL, 't'},
 		{"statements", no_argument, NULL, 's'},
 		{"hide-timestamps", no_argument, NULL, 'T'},	
-		{"rmname", required_argument, NULL, 'r'},
+		{"rmid", required_argument, NULL, 'r'},
 		{"oid2name", no_argument, NULL, 'n'},
 		{"host", required_argument, NULL, 'h'},
 		{"port", required_argument, NULL, 'p'},
@@ -669,8 +674,8 @@ main(int argc, char** argv)
 			case 'n':
 				oid2name = true;
 				break;
-			case 'r':			/* output only rmname passed */
-				snprintf(rmname, sizeof (rmname), "%-5s", optarg);
+			case 'r':			/* output only rmid passed */
+			  	rmid = atoi(optarg);
 				break;
 			case 'h':			/* host for tranlsting oids */
 				pghost = optarg;
@@ -693,9 +698,9 @@ main(int argc, char** argv)
 		exit(1);
 	}
 
-	if (strcmp("ALL  ", rmname) && transactions)
+	if (rmid>=0 && transactions)
 	{
-		fprintf(stderr, "options \"rmname\" (-r) and \"transactions\" (-t) cannot be used together\n");
+		fprintf(stderr, "options \"rmid\" (-r) and \"transactions\" (-t) cannot be used together\n");
 		exit(1);
 	}
 

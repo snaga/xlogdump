@@ -20,23 +20,31 @@
 #include "xlogdump_oid2name.h"
 #include "xlogdump_statement.h"
 
+/*
+ * See access/tramsam/rmgr.c for more details.
+ */
 const char * const RM_names[RM_MAX_ID+1] = {
-	"XLOG ",					/* 0 */
-	"XACT ",					/* 1 */
-	"SMGR ",					/* 2 */
-	"CLOG ",					/* 3 */
-	"DBASE",					/* 4 */
-	"TBSPC",					/* 5 */
-	"MXACT",					/* 6 */
-	"RM  7",					/* 7 */
-	"RM  8",					/* 8 */
-	"HEAP2",					/* 9 */
-	"HEAP ",					/* 10 */
-	"BTREE",					/* 11 */
-	"HASH ",					/* 12 */
-	"GIN",						/* 13 */
-	"GIST ",					/* 14 */
-	"SEQ  "						/* 15 */
+	"XLOG",						/* 0 */
+	"Transaction",					/* 1 */
+	"Storage",					/* 2 */
+	"CLOG",						/* 3 */
+	"Database",					/* 4 */
+	"Tablespace",					/* 5 */
+	"MultiXact",					/* 6 */
+#if PG_VERSION_NUM >=90000
+	"RelMap",					/* 7 */
+	"Standby",					/* 8 */
+#else
+	"Reserved 7",					/* 7 */
+	"Reserved 8",					/* 8 */
+#endif
+	"Heap2",					/* 9 */
+	"Heap",						/* 10 */
+	"Btree",					/* 11 */
+	"Hash",						/* 12 */
+	"Gin",						/* 13 */
+	"Gist",						/* 14 */
+	"Sequence"					/* 15 */
 };
 
 static char *str_time(time_t);
