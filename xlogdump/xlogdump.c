@@ -34,6 +34,7 @@
 
 #include "access/tupmacs.h"
 #include "access/nbtree.h"
+#include "access/transam.h"
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
@@ -65,6 +66,7 @@ static bool 		transactions = false; /* when true we just aggregate transaction i
 static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
 static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
 static int 		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
+static TransactionId	xid = InvalidTransactionId;
 
 /* Buffers to hold objects names */
 static char 		spaceName[NAMEDATALEN] = "";
@@ -368,6 +370,9 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 	if (rmid>=0 && record->xl_rmid!=rmid)
 		return;
 
+	if (xid!=InvalidTransactionId && xid!=record->xl_xid)
+		return;
+
 #ifdef NOT_USED
 	printf("%u/%08X: prv %u/%08X",
 		   curRecPtr.xlogid, curRecPtr.xrecoff,
@@ -612,6 +617,8 @@ help(void)
 	printf("                            RMID:Resource Manager\n");
 	for (i=0 ; i<RM_MAX_ID+1 ; i++)
 		printf("                              %2d:%s\n", i, RM_names[i]);
+	printf("  -x, --xid=XID             Outputs only the transaction log records\n"); 
+	printf("                            containing the specified transaction id.\n");
 	printf("  -t, --transactions        Outputs only transaction info: the xid,\n");
 	printf("                            total length and status of each transaction.\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
@@ -645,6 +652,7 @@ main(int argc, char** argv)
 		{"hide-timestamps", no_argument, NULL, 'T'},	
 		{"rmid", required_argument, NULL, 'r'},
 		{"oid2name", no_argument, NULL, 'n'},
+		{"xid", required_argument, NULL, 'x'},
 		{"host", required_argument, NULL, 'h'},
 		{"port", required_argument, NULL, 'p'},
 		{"user", required_argument, NULL, 'U'},
@@ -655,7 +663,7 @@ main(int argc, char** argv)
 	if (argc == 1 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-?"))
 		help();
 
-	while ((c = getopt_long(argc, argv, "stTnr:h:p:U:",
+	while ((c = getopt_long(argc, argv, "stTnr:x:h:p:U:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -676,6 +684,9 @@ main(int argc, char** argv)
 				break;
 			case 'r':			/* output only rmid passed */
 			  	rmid = atoi(optarg);
+				break;
+			case 'x':			/* output only xid passed */
+			  	xid = atoi(optarg);
 				break;
 			case 'h':			/* host for tranlsting oids */
 				pghost = optarg;

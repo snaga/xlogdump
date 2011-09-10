@@ -49,6 +49,8 @@ Options:
                               13:Gin
                               14:Gist
                               15:Sequence
+  -x, --xid=XID             Outputs only the transaction log records
+                            containing the specified transaction id.
   -t, --transactions        Outputs only transaction info: the xid,
                             total length and status of each transaction.
   -s, --statements          Tries to build fake statements that produce the
