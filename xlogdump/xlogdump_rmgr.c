@@ -47,11 +47,41 @@ const char * const RM_names[RM_MAX_ID+1] = {
 	"Sequence"					/* 15 */
 };
 
+/* copy from utils/timestamp.h */
+#define SECS_PER_DAY	86400
+#ifdef HAVE_INT64_TIMESTAMP
+#define USECS_PER_DAY	INT64CONST(86400000000)
+#endif
+
+/* copy from utils/datetime.h */
+#define UNIX_EPOCH_JDATE		2440588 /* == date2j(1970, 1, 1) */
+#define POSTGRES_EPOCH_JDATE	2451545 /* == date2j(2000, 1, 1) */
+
+
+static pg_time_t _timestamptz_to_time_t(TimestampTz);
 static char *str_time(time_t);
 static bool dump_xlog_btree_insert_meta(XLogRecord *);
 /* GIST stuffs */
 static void decodePageUpdateRecord(PageUpdateRecord *, XLogRecord *);
 static void decodePageSplitRecord(PageSplitRecord *, XLogRecord *);
+
+
+/* copy from utils/adt/timestamp.c, and renamed because of the name conflict. */
+static pg_time_t
+_timestamptz_to_time_t(TimestampTz t)
+{
+  pg_time_t       result;
+
+#ifdef HAVE_INT64_TIMESTAMP
+  result = (pg_time_t) (t / USECS_PER_SEC +
+			((POSTGRES_EPOCH_JDATE - UNIX_EPOCH_JDATE) * SECS_PER_DAY));
+#else
+  result = (pg_time_t) (t +
+			((POSTGRES_EPOCH_JDATE - UNIX_EPOCH_JDATE) * SECS_PER_DAY));
+#endif
+
+  return result;
+}
 
 static char *
 str_time(time_t tnow)
@@ -184,13 +214,13 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 #if PG_VERSION_NUM >= 90000
 		snprintf(buf, sizeof(buf), "d/s:%d/%d commit at %s",
 			 xlrec.dbId, xlrec.tsId,
-			 str_time(xlrec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.xact_time)));
 #elif PG_VERSION_NUM >= 80300
 		snprintf(buf, sizeof(buf), "commit at %s",
-			 str_time(xlrec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.xact_time)));
 #else
 		snprintf(buf, sizeof(buf), "commit at %s",
-			 str_time(xlrec.xtime));
+			 str_time(_timestamptz_to_time_t(xlrec.xtime)));
 #endif
 		}
 		break;
@@ -205,9 +235,9 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 		snprintf(buf, sizeof(buf), "abort at %s",
 #if PG_VERSION_NUM >= 80300
-			 str_time(xlrec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.xact_time)));
 #else
-			 str_time(xlrec.xtime));
+			 str_time(_timestamptz_to_time_t(xlrec.xtime)));
 #endif
 		}
 		break;
@@ -221,15 +251,15 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 		snprintf(buf, sizeof(buf), "commit prepared xid:%d, dbid:%d, spcid:%d, commit at %s",
 			 xlrec.xid,
 			 xlrec.crec.dbId, xlrec.crec.tsId,
-			 str_time(xlrec.crec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.crec.xact_time)));
 #elif PG_VERSION_NUM >= 80300
 		snprintf(buf, sizeof(buf), "commit prepared xid:%d, commit at %s",
 			 xlrec.xid,
-			 str_time(xlrec.crec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.crec.xact_time)));
 #else
 		snprintf(buf, sizeof(buf), "commit prepared xid:%d, commit at %s",
 			 xlrec.xid,
-			 str_time(xlrec.crec.xtime));
+			 str_time(_timestamptz_to_time_t(xlrec.crec.xtime)));
 #endif
 		}
 		break;
@@ -243,15 +273,15 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 		snprintf(buf, sizeof(buf), "abort prepared xid:%d, dbid:%d, spcid:%d, commit at %s",
 			 xlrec.xid,
 			 xlrec.crec.dbId, xlrec.crec.tsId,
-			 str_time(xlrec.crec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.crec.xact_time)));
 #elif PG_VERSION_NUM >= 80300
 		snprintf(buf, sizeof(buf), "abort prepared xid:%d, commit at %s",
 			 xlrec.xid,
-			 str_time(xlrec.crec.xact_time));
+			 str_time(_timestamptz_to_time_t(xlrec.crec.xact_time)));
 #else
 		snprintf(buf, sizeof(buf), "abort prepared xid:%d, commit at %s",
 			 xlrec.xid,
-			 str_time(xlrec.crec.xtime));
+			 str_time(_timestamptz_to_time_t(xlrec.crec.xtime)));
 #endif
 		}
 		break;
