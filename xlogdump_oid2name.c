@@ -172,7 +172,6 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
 
 	if (conn)
 	{
-		PQclear(res);
 		//		printf("DEBUG: getSpaceName: SELECT spcname FROM pg_tablespace WHERE oid = %i\n", space);
 		appendPQExpBuffer(dbQry, "SELECT spcname FROM pg_tablespace WHERE oid = %i", space);
 		res = PQexec(conn, dbQry->data);
@@ -188,9 +187,12 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
 			//			printf("DEBUG: getSpaceName: spcname = %s\n", buf);
 			cache_put(space, buf);
+			PQclear(res);
 			return buf;
 		}
 	}
+
+	PQclear(res);
 
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", space);
@@ -215,7 +217,6 @@ getDbName(uint32 db, char *buf, size_t buflen)
 
 	if (conn)
 	{	
-		PQclear(res);
 		appendPQExpBuffer(dbQry, "SELECT datname FROM pg_database WHERE oid = %i", db);
 		res = PQexec(conn, dbQry->data);
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -243,9 +244,12 @@ getDbName(uint32 db, char *buf, size_t buflen)
 						  pguser,
 						  pgpass);
 
+			PQclear(res);
 			return buf;
 		}
 	}
+
+	PQclear(res);
 
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", db);
@@ -270,7 +274,6 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 
 	if (conn && lastDbConn)
 	{
-		PQclear(res);
 		/* Try the relfilenode and oid just in case the filenode has changed
 		   If it has changed more than once we can't translate it's name */
 		appendPQExpBuffer(dbQry, "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
@@ -286,9 +289,12 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
 			cache_put(relid, buf);
+			PQclear(res);
 			return buf;
 		}
 	}
+
+	PQclear(res);
 	
 	/* Didn't find the name, return string with oid */
 	snprintf(buf, buflen, "%u", relid);
@@ -300,7 +306,6 @@ int
 relname2attr_begin(const char *relname)
 {
 	resetPQExpBuffer(dbQry);
-	PQclear(res);
 
 	appendPQExpBuffer(dbQry, "SELECT attname, atttypid FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
 	res = PQexec(lastDbConn, dbQry->data);
