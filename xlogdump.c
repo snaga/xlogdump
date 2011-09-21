@@ -65,6 +65,7 @@ static uint32		readRecordBufSize = 0;
 static bool 		transactions = false; /* when true we just aggregate transaction info */
 static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
 static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
+static bool 		enable_stats = false;   /* collect and show statistics */
 static int 		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
 static TransactionId	xid = InvalidTransactionId;
 
@@ -74,11 +75,21 @@ static char 		dbName[NAMEDATALEN]  = "";
 static char 		relName[NAMEDATALEN]  = "";
 
 
+struct xlog_stats_t {
+	int rmgr_count[RM_MAX_ID+1];
+	int bkpblock_count;
+	int bkpblock_len;
+};
+
+struct xlog_stats_t xlogstats;
+
 /* struct to aggregate transactions */
 transInfoPtr 		transactionsInfo = NULL;
 
 
 /* prototypes */
+static void print_xlog_stats();
+
 static bool readXLogPage(void);
 void exit_gracefuly(int);
 static bool RecordIsValid(XLogRecord *, XLogRecPtr);
@@ -91,6 +102,19 @@ static void addTransaction(XLogRecord *);
 static void dumpTransactions();
 static void dumpXLog(char *);
 static void help(void);
+
+static void
+print_xlog_stats()
+{
+	int i;
+
+	printf("Resource manager stats: \n");
+	for (i=0 ; i<RM_MAX_ID+1 ; i++)
+	{
+		printf("  [%d]%s: %d\n", i, RM_names[i], xlogstats.rmgr_count[i]);
+	}
+	printf("Backup block stats: %d block(s), %d byte(s)\n", xlogstats.bkpblock_count, xlogstats.bkpblock_len);
+}
 
 /* Read another page, if possible */
 static bool
@@ -401,6 +425,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 	/*
 	 * See rmgr.h for more details about the built-in resource managers.
 	 */
+	xlogstats.rmgr_count[record->xl_rmid]++;
 	switch (record->xl_rmid)
 	{
 		case RM_XLOG_ID:
@@ -487,7 +512,7 @@ print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
 		getRelName(bkb.node.relNode, relName, sizeof(relName));
 		snprintf(buf, sizeof(buf), "bkpblock[%d]: s/d/r:%s/%s/%s blk:%u hole_off/len:%u/%u\n", 
 				i+1, spaceName, dbName, relName,
-			   	bkb.block, bkb.hole_offset, bkb.hole_length);
+				bkb.block, bkb.hole_offset, bkb.hole_length);
 		blk += sizeof(BkpBlock) + (BLCKSZ - bkb.hole_length);
 
 		printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s",
@@ -498,6 +523,9 @@ print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
 		       rec->xl_len, rec->xl_tot_len,
 		       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
 		       buf);
+
+		xlogstats.bkpblock_count++;
+		xlogstats.bkpblock_len += (BLCKSZ - bkb.hole_length);
 	}
 }
 
@@ -623,6 +651,8 @@ help(void)
 	printf("                            total length and status of each transaction.\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
 	printf("                            physical changes found within the xlog segments.\n");
+	printf("  -S, --stats               Collect and show statistics of XLOG records\n");
+	printf("                            from XLOG segments.\n");
 	printf("  -n, --oid2name            Show object names instead of OIDs with looking up\n");
 	printf("                            the system catalogs.\n");
 	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
@@ -649,6 +679,7 @@ main(int argc, char** argv)
 	static struct option long_options[] = {
 		{"transactions", no_argument, NULL, 't'},
 		{"statements", no_argument, NULL, 's'},
+		{"stats", no_argument, NULL, 'S'},
 		{"hide-timestamps", no_argument, NULL, 'T'},	
 		{"rmid", required_argument, NULL, 'r'},
 		{"oid2name", no_argument, NULL, 'n'},
@@ -663,13 +694,17 @@ main(int argc, char** argv)
 	if (argc == 1 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-?"))
 		help();
 
-	while ((c = getopt_long(argc, argv, "stTnr:x:h:p:U:",
+	while ((c = getopt_long(argc, argv, "sStTnr:x:h:p:U:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
 			case 's':			/* show statements */
 				statements = true;
+				break;
+
+			case 'S':			/* show statistics */
+				enable_stats = true;
 				break;
 
 			case 't':			
@@ -740,6 +775,9 @@ main(int argc, char** argv)
 		}
 		dumpXLog(fname);
 	}
+
+	if (enable_stats)
+		print_xlog_stats();
 
 	exit_gracefuly(0);
 	
