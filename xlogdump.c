@@ -77,6 +77,7 @@ static char 		relName[NAMEDATALEN]  = "";
 
 struct xlog_stats_t {
 	int rmgr_count[RM_MAX_ID+1];
+	int rmgr_len[RM_MAX_ID+1];
 	int bkpblock_count;
 	int bkpblock_len;
 };
@@ -111,7 +112,9 @@ print_xlog_stats()
 	printf("Resource manager stats: \n");
 	for (i=0 ; i<RM_MAX_ID+1 ; i++)
 	{
-		printf("  [%d]%s: %d\n", i, RM_names[i], xlogstats.rmgr_count[i]);
+		printf("  [%d]%s: %d record(s), %d byte(s)\n", i, RM_names[i],
+		       xlogstats.rmgr_count[i],
+		       xlogstats.rmgr_len[i]);
 	}
 	printf("Backup block stats: %d block(s), %d byte(s)\n", xlogstats.bkpblock_count, xlogstats.bkpblock_len);
 }
@@ -426,6 +429,7 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 	 * See rmgr.h for more details about the built-in resource managers.
 	 */
 	xlogstats.rmgr_count[record->xl_rmid]++;
+	xlogstats.rmgr_len[record->xl_rmid] += record->xl_len;
 	switch (record->xl_rmid)
 	{
 		case RM_XLOG_ID:
@@ -651,8 +655,8 @@ help(void)
 	printf("                            total length and status of each transaction.\n");
 	printf("  -s, --statements          Tries to build fake statements that produce the\n");
 	printf("                            physical changes found within the xlog segments.\n");
-	printf("  -S, --stats               Collect and show statistics of XLOG records\n");
-	printf("                            from XLOG segments.\n");
+	printf("  -S, --stats               Collects and shows statistics of the transaction\n");
+	printf("                            log records from the xlog segments.\n");
 	printf("  -n, --oid2name            Show object names instead of OIDs with looking up\n");
 	printf("                            the system catalogs.\n");
 	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
