@@ -57,6 +57,26 @@ const char * const RM_names[RM_MAX_ID+1] = {
 #define UNIX_EPOCH_JDATE		2440588 /* == date2j(1970, 1, 1) */
 #define POSTGRES_EPOCH_JDATE	2451545 /* == date2j(2000, 1, 1) */
 
+static bool dump_enabled = true;
+
+struct xlogdump_rmgr_stats_t {
+	int xlog_checkpoint;
+	int xlog_switch;
+	int xlog_backup_end;
+	int xact_commit;
+	int xact_abort;
+	int heap_insert;
+	int heap_delete;
+	int heap_update;
+	int heap_hot_update;
+	int heap_move;
+	int heap_newpage;
+	int heap_lock;
+	int heap_inplace;
+	int heap_init_page;
+};
+
+static struct xlogdump_rmgr_stats_t rmgr_stats;
 
 static pg_time_t _timestamptz_to_time_t(TimestampTz);
 static char *str_time(time_t);
@@ -65,6 +85,33 @@ static bool dump_xlog_btree_insert_meta(XLogRecord *);
 static void decodePageUpdateRecord(PageUpdateRecord *, XLogRecord *);
 static void decodePageSplitRecord(PageSplitRecord *, XLogRecord *);
 
+void
+print_xlog_rmgr_stats(int rmid)
+{
+	switch (rmid)
+	{
+	case RM_XLOG_ID:
+		printf("                 checkpoint: %d, switch: %d, backup end: %d\n",
+		       rmgr_stats.xlog_checkpoint,
+		       rmgr_stats.xlog_switch,
+		       rmgr_stats.xlog_backup_end);
+		break;
+
+	case RM_XACT_ID:
+		printf("                 commit: %d, abort: %d\n",
+		       rmgr_stats.xact_commit,
+		       rmgr_stats.xact_abort);
+		break;
+
+	case RM_HEAP_ID:
+		printf("                 ins: %d, upd/hot_upd: %d/%d, del: %d\n",
+		       rmgr_stats.heap_insert,
+		       rmgr_stats.heap_update,
+		       rmgr_stats.heap_hot_update,
+		       rmgr_stats.heap_delete);
+		break;
+	}
+}
 
 /* copy from utils/adt/timestamp.c, and renamed because of the name conflict. */
 static pg_time_t
@@ -95,6 +142,12 @@ str_time(time_t tnow)
 	return buf;
 }
 
+void
+enable_rmgr_dump(bool flag)
+{
+	dump_enabled = flag;
+}
+
 /*
  * a common part called by each `print_rmgr_*()' to print a xlog record header
  * with the detail.
@@ -102,6 +155,9 @@ str_time(time_t tnow)
 static void
 print_rmgr_record(XLogRecPtr cur, XLogRecord *rec, const char *detail)
 {
+	if (!dump_enabled)
+		return;
+
 	printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s\n",
 	       cur.xlogid, cur.xrecoff,
 	       rec->xl_xid,
@@ -145,6 +201,7 @@ print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 			       (info == XLOG_CHECKPOINT_SHUTDOWN) ?
 			       "shutdown" : "online");
 		
+		rmgr_stats.xlog_checkpoint++;
 		break;
 	}
 
@@ -168,6 +225,7 @@ print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 	case XLOG_SWITCH:
 	{
 		snprintf(buf, sizeof(buf), "switch:");
+		rmgr_stats.xlog_switch++;
 		break;
 	}
 
@@ -179,6 +237,8 @@ print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 		memcpy(&startpoint, XLogRecGetData(record), sizeof(XLogRecPtr));
 		snprintf(buf, sizeof(buf), "backup end: started at %X/%X.",
 			 startpoint.xlogid, startpoint.xrecoff);
+
+		rmgr_stats.xlog_backup_end++;
 		break;
 	}
 
@@ -223,6 +283,7 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 			 str_time(_timestamptz_to_time_t(xlrec.xtime)));
 #endif
 		}
+		rmgr_stats.xact_commit++;
 		break;
 
 	case XLOG_XACT_PREPARE:
@@ -240,6 +301,7 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 			 str_time(_timestamptz_to_time_t(xlrec.xtime)));
 #endif
 		}
+		rmgr_stats.xact_abort++;
 		break;
 
 	case XLOG_XACT_COMMIT_PREPARED:
@@ -588,8 +650,9 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 				strncat(buf, buf2, sizeof(buf));
 			}
 			else
-				printf("header: none\n");
+				strncat(buf, " header: none", sizeof(buf));
 
+			rmgr_stats.heap_insert++;
 			break;
 		}
 		case XLOG_HEAP_DELETE:
@@ -609,6 +672,8 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
 				   ItemPointerGetOffsetNumber(&xlrec.target.tid));
+
+			rmgr_stats.heap_delete++;
 			break;
 		}
 		case XLOG_HEAP_UPDATE:
@@ -638,6 +703,12 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 				   ItemPointerGetOffsetNumber(&xlrec.target.tid),
 				   ItemPointerGetBlockNumber(&xlrec.newtid),
 				   ItemPointerGetOffsetNumber(&xlrec.newtid));
+
+			if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP_UPDATE)
+				rmgr_stats.heap_update++;
+			else
+				rmgr_stats.heap_hot_update++;
+
 			break;
 		}
 #if PG_VERSION_NUM < 90000
@@ -656,6 +727,8 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 				   ItemPointerGetOffsetNumber(&xlrec.target.tid),
 				   ItemPointerGetBlockNumber(&xlrec.newtid),
 				   ItemPointerGetOffsetNumber(&xlrec.newtid));
+
+			rmgr_stats.heap_move++;
 			break;
 		}
 #endif
@@ -670,6 +743,8 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 			snprintf(buf, sizeof(buf), "newpage: s/d/r:%s/%s/%s block %u", 
 					spaceName, dbName, relName,
 				   xlrec.blkno);
+
+			rmgr_stats.heap_newpage++;
 			break;
 		}
 		case XLOG_HEAP_LOCK:
@@ -685,6 +760,8 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 				   spaceName, dbName, relName,
 				   ItemPointerGetBlockNumber(&xlrec.target.tid),
 				   ItemPointerGetOffsetNumber(&xlrec.target.tid));
+
+			rmgr_stats.heap_lock++;
 			break;
 		}
 
@@ -700,12 +777,15 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 					spaceName, dbName, relName,
 				   	ItemPointerGetBlockNumber(&xlrec.target.tid),
 				   	ItemPointerGetOffsetNumber(&xlrec.target.tid));
+
+			rmgr_stats.heap_inplace++;
 			break;
 		}
 
 		case XLOG_HEAP_INIT_PAGE:
 		{
 			snprintf(buf, sizeof(buf), "init page");
+			rmgr_stats.heap_init_page++;
 			break;
 		}
 
@@ -810,6 +890,7 @@ print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			char *datapos = XLogRecGetData(record);
 			xl_btree_split xlrec;
 			OffsetNumber newitemoff;
+			char buf2[1024];
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 			datapos += SizeOfBtreeSplit;
@@ -820,26 +901,21 @@ print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 #endif
 
 #if PG_VERSION_NUM >= 80300
-			printf("split_l%s: s/d/r:%s/%s/%s rightsib %u\n",
+			snprintf(buf, sizeof(buf), "split_l%s: s/d/r:%s/%s/%s rightsib %u"
+				 " lsib %u rsib %u rnext %u level %u firstright %u",
 				info == XLOG_BTREE_SPLIT_L_ROOT ? "_root" : "",
-				spaceName, dbName, relName, xlrec.rightsib);
+				spaceName, dbName, relName, xlrec.rightsib,
+				xlrec.leftsib, xlrec.rightsib,
+				xlrec.rnext, xlrec.level, xlrec.firstright);
 #else
-			printf("split_l%s: rightblk %u\n",
+			snprintf(buf, sizeof(buf), "split_l%s: rightblk %u"
+				 " lblk %u rblk %u level %u",
 				info == XLOG_BTREE_SPLIT_L_ROOT ? "_root" : "",
-				xlrec.rightblk);
+				xlrec.rightblk,
+				xlrec.leftblk, xlrec.rightblk,
+				xlrec.level);
 #endif
 
-#if PG_VERSION_NUM >= 80300
-			printf(" lsib %u rsib %u rnext %u level %u firstright %u\n",
-				xlrec.leftsib, xlrec.rightsib,
-				xlrec.rnext, xlrec.level, xlrec.firstright
-			);
-#else
-			printf(" lblk %u rblk %u level %u\n",
-				xlrec.leftblk, xlrec.rightblk,
-				xlrec.level
-			);
-#endif
 			/* downlinks */
 			if (xlrec.level > 0)
 			{
@@ -852,14 +928,18 @@ print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			/* newitemoff */
 			memcpy(&newitemoff, datapos, sizeof(OffsetNumber));
 			datapos += sizeof(OffsetNumber);
-			printf("newitemoff: %u\n", newitemoff);
+
+			snprintf(buf2, sizeof(buf2), " newitemoff: %u", newitemoff);
+			strncat(buf, buf2, sizeof(buf));
+
 			/* newitem (only when bkpblock1 is not recorded) */
 			if (!(record->xl_info & XLR_BKP_BLOCK_1))
 			{
 				IndexTuple newitem = (IndexTuple)datapos;
-				printf("newitem: { block %u pos 0x%x }\n",
+				snprintf(buf2, sizeof(buf2), " newitem: { block %u pos 0x%x }",
 					BlockIdGetBlockNumber(&newitem->t_tid.ip_blkid),
 					newitem->t_tid.ip_posid);
+				strncat(buf, buf2, sizeof(buf));
 			}
 			/* items in right page should be here */
 			break;
@@ -877,11 +957,11 @@ print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 #endif
 
 #if PG_VERSION_NUM >= 80300
-			printf("split_r%s: s/d/r:%s/%s/%s leftsib %u\n", 
+			snprintf(buf, sizeof(buf), "split_r%s: s/d/r:%s/%s/%s leftsib %u\n", 
 					info == XLOG_BTREE_SPLIT_R_ROOT ? "_root" : "",
 					spaceName, dbName, relName, xlrec.leftsib);
 #else
-			printf("split_r%s: leftblk %u\n", 
+			snprintf(buf, sizeof(buf), "split_r%s: leftblk %u\n", 
 					info == XLOG_BTREE_SPLIT_R_ROOT ? "_root" : "",
 					xlrec.leftblk);
 #endif

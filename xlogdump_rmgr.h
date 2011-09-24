@@ -53,6 +53,9 @@ typedef struct
 
 extern const char * const RM_names[RM_MAX_ID+1];
 
+void print_xlog_rmgr_stats(int);
+
+void enable_rmgr_dump(bool);
 void print_rmgr_xlog(XLogRecPtr, XLogRecord *, uint8, bool);
 void print_rmgr_xact(XLogRecPtr, XLogRecord *, uint8, bool);
 void print_rmgr_smgr(XLogRecPtr, XLogRecord *, uint8);

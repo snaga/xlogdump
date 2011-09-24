@@ -108,15 +108,39 @@ static void
 print_xlog_stats()
 {
 	int i;
+	double avg = 0;
+
+	printf("---------------------------------------------------------------\n");
+	printf("TimeLineId: %d, LogId: %d, LogSegment: %d\n", logTLI, logId, logSeg);
+	printf("\n");
 
 	printf("Resource manager stats: \n");
 	for (i=0 ; i<RM_MAX_ID+1 ; i++)
 	{
-		printf("  [%d]%s: %d record(s), %d byte(s)\n", i, RM_names[i],
-		       xlogstats.rmgr_count[i],
-		       xlogstats.rmgr_len[i]);
+		avg = 0;
+
+		if ( xlogstats.rmgr_count[i]>0 )
+			avg = (double)xlogstats.rmgr_len[i] / (double)xlogstats.rmgr_count[i];
+		  
+		printf("  [%d]%-10s: %d record%s, %d byte%s (avg %.1f byte%s)\n",
+		       i, RM_names[i],
+		       xlogstats.rmgr_count[i], (xlogstats.rmgr_count[i]>1) ? "s" : "",
+		       xlogstats.rmgr_len[i], (xlogstats.rmgr_len[i]>1) ? "s" : "",
+		       avg, (avg>1) ? "s" : "");
+
+		print_xlog_rmgr_stats(i);
 	}
-	printf("Backup block stats: %d block(s), %d byte(s)\n", xlogstats.bkpblock_count, xlogstats.bkpblock_len);
+
+	avg = 0;
+	if ( xlogstats.bkpblock_count>0 )
+		avg = (double)xlogstats.bkpblock_len / (double)xlogstats.bkpblock_count;
+
+	printf("\nBackup block stats: %d block%s, %d byte%s (avg %.1f byte%s)\n",
+	       xlogstats.bkpblock_count, (xlogstats.bkpblock_count>1) ? "s" : "",
+	       xlogstats.bkpblock_len,  (xlogstats.bkpblock_len>1) ? "s" : "",
+	       avg, (avg>1) ? "s" : "");
+
+	printf("\n");
 }
 
 /* Read another page, if possible */
@@ -500,6 +524,9 @@ print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
 	int i;
 	char buf[1024];
 
+	if (enable_stats)
+		return;
+
 	/*
 	 * backup blocks by full_page_write
 	 */
@@ -709,6 +736,7 @@ main(int argc, char** argv)
 
 			case 'S':			/* show statistics */
 				enable_stats = true;
+				enable_rmgr_dump(false);
 				break;
 
 			case 't':			
