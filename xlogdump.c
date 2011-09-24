@@ -524,9 +524,6 @@ print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
 	int i;
 	char buf[1024];
 
-	if (enable_stats)
-		return;
-
 	/*
 	 * backup blocks by full_page_write
 	 */
@@ -546,14 +543,15 @@ print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
 				bkb.block, bkb.hole_offset, bkb.hole_length);
 		blk += sizeof(BkpBlock) + (BLCKSZ - bkb.hole_length);
 
-		printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s",
-		       cur.xlogid, cur.xrecoff,
-		       rec->xl_xid,
-		       rec->xl_rmid,
-		       RM_names[rec->xl_rmid],
-		       rec->xl_len, rec->xl_tot_len,
-		       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
-		       buf);
+		if (!enable_stats)
+			printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s",
+			       cur.xlogid, cur.xrecoff,
+			       rec->xl_xid,
+			       rec->xl_rmid,
+			       RM_names[rec->xl_rmid],
+			       rec->xl_len, rec->xl_tot_len,
+			       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
+			       buf);
 
 		xlogstats.bkpblock_count++;
 		xlogstats.bkpblock_len += (BLCKSZ - bkb.hole_length);
