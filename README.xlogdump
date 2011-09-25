@@ -23,6 +23,18 @@ How to install
     make top_builddir=/path/to/postgresql-9.0.x install
 
    
+Supported Version
+=================
+
+  xlogdump is able to be compiled and work with following versions:
+
+  - PostgreSQL 9.1.x
+  - PostgreSQL 9.0.x
+  - PostgreSQL 8.4.x
+  - PostgreSQL 8.3.x
+  - PostgreSQL 8.2.x
+
+
 Usage
 =====
 
