@@ -11,8 +11,8 @@
 
 static PGconn		*conn = NULL; /* Connection for translating oids of global objects */
 static PGconn		*lastDbConn = NULL; /* Connection for translating oids of per database objects */
-static PGresult		*res;
-static PQExpBuffer	dbQry;
+
+static PGresult		*_res = NULL; /* a result set variable for relname2attr_*() functions */
 
 static char *pghost = NULL;
 static char *pgport = NULL;
@@ -150,8 +150,6 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 		return false;
 	}
 	
-	dbQry = createPQExpBuffer();
-
 	return true;
 }
 
@@ -162,7 +160,8 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 char *
 getSpaceName(uint32 space, char *buf, size_t buflen)
 {
-	resetPQExpBuffer(dbQry);
+	char dbQry[1024];
+	PGresult *res = NULL;
 
 	if (cache_get(space))
 	{
@@ -173,15 +172,14 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
 	if (conn)
 	{
 		//		printf("DEBUG: getSpaceName: SELECT spcname FROM pg_tablespace WHERE oid = %i\n", space);
-		appendPQExpBuffer(dbQry, "SELECT spcname FROM pg_tablespace WHERE oid = %i", space);
-		res = PQexec(conn, dbQry->data);
+		snprintf(dbQry, sizeof(dbQry), "SELECT spcname FROM pg_tablespace WHERE oid = %i", space);
+		res = PQexec(conn, dbQry);
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 			PQclear(res);
 			return NULL;
 		}
-		resetPQExpBuffer(dbQry);
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
@@ -207,7 +205,8 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
 char *
 getDbName(uint32 db, char *buf, size_t buflen)
 {
-	resetPQExpBuffer(dbQry);
+	char dbQry[1024];
+	PGresult *res = NULL;
 
 	if (cache_get(db))
 	{
@@ -217,15 +216,14 @@ getDbName(uint32 db, char *buf, size_t buflen)
 
 	if (conn)
 	{	
-		appendPQExpBuffer(dbQry, "SELECT datname FROM pg_database WHERE oid = %i", db);
-		res = PQexec(conn, dbQry->data);
+		snprintf(dbQry, sizeof(dbQry), "SELECT datname FROM pg_database WHERE oid = %i", db);
+		res = PQexec(conn, dbQry);
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 			PQclear(res);
 			return NULL;
 		}
-		resetPQExpBuffer(dbQry);
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
@@ -264,7 +262,8 @@ getDbName(uint32 db, char *buf, size_t buflen)
 char *
 getRelName(uint32 relid, char *buf, size_t buflen)
 {
-	resetPQExpBuffer(dbQry);
+	char dbQry[1024];
+	PGresult *res = NULL;
 
 	if (cache_get(relid))
 	{
@@ -276,15 +275,14 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 	{
 		/* Try the relfilenode and oid just in case the filenode has changed
 		   If it has changed more than once we can't translate it's name */
-		appendPQExpBuffer(dbQry, "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
-		res = PQexec(lastDbConn, dbQry->data);
+		snprintf(dbQry, sizeof(dbQry), "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
+		res = PQexec(lastDbConn, dbQry);
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
 			PQclear(res);
 			return NULL;
 		}
-		resetPQExpBuffer(dbQry);
 		if(PQntuples(res) > 0)
 		{
 			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
@@ -301,38 +299,40 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 	return buf;
 }
 
-
 int
 relname2attr_begin(const char *relname)
 {
-	resetPQExpBuffer(dbQry);
+	char dbQry[1024];
 
-	appendPQExpBuffer(dbQry, "SELECT attname, atttypid FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
-	res = PQexec(lastDbConn, dbQry->data);
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	if ( _res!=NULL )
+		PQclear(_res);
+
+	snprintf(dbQry, sizeof(dbQry), "SELECT attname, atttypid FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
+	_res = PQexec(lastDbConn, dbQry);
+	if (PQresultStatus(_res) != PGRES_TUPLES_OK)
 	{
 		fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-		PQclear(res);
+		PQclear(_res);
+		_res = NULL;
 		return -1;
 	}
-	resetPQExpBuffer(dbQry);
 
-	return PQntuples(res);
+	return PQntuples(_res);
 }
 
 int
 relname2attr_fetch(int i, char *attname, Oid *atttypid)
 {
-	snprintf(attname, NAMEDATALEN, PQgetvalue(res, i, 0));
-	*atttypid = atoi( PQgetvalue(res, i, 1) );
+	snprintf(attname, NAMEDATALEN, PQgetvalue(_res, i, 0));
+	*atttypid = atoi( PQgetvalue(_res, i, 1) );
 	return i;
 }
 
 void
 relname2attr_end()
 {
-	resetPQExpBuffer(dbQry);
-	PQclear(res);
+	PQclear(_res);
+	_res = NULL;
 }
 
 bool
@@ -344,7 +344,6 @@ oid2name_enabled(void)
 void
 DBDisconnect(void)
 {
-	destroyPQExpBuffer(dbQry);
 	if(lastDbConn)
 		PQfinish(lastDbConn);
 	if(conn)
