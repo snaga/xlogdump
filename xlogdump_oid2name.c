@@ -323,7 +323,7 @@ relname2attr_begin(const char *relname)
 int
 relname2attr_fetch(int i, char *attname, Oid *atttypid)
 {
-	snprintf(attname, NAMEDATALEN, PQgetvalue(_res, i, 0));
+	snprintf(attname, NAMEDATALEN, "%s", PQgetvalue(_res, i, 0));
 	*atttypid = atoi( PQgetvalue(_res, i, 1) );
 	return i;
 }
