@@ -314,8 +314,8 @@ restart:
 		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
 	{
 		printf("invalid record length(expected %u ~ %u, actual %d) at %X/%X\n",
-				SizeOfXLogRecord + record->xl_len,
-				SizeOfXLogRecord + record->xl_len +
+				(unsigned int)SizeOfXLogRecord + record->xl_len,
+				(unsigned int)SizeOfXLogRecord + record->xl_len +
 					XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ),
 				record->xl_tot_len,
 			   curRecPtr.xlogid, curRecPtr.xrecoff);
