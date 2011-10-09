@@ -105,51 +105,41 @@ cache_put(Oid oid, char *name)
 bool
 DBConnect(const char *host, const char *port, char *database, const char *user)
 {
-	char	*password = NULL;
-	char	*password_prompt = NULL;
-	bool	need_pass;
-
 	pghost = strdup(host);
 	pgport = strdup(port);
 	pguser = strdup(user);
+	pgpass = NULL;
 
-	/* loop until we have a password if requested by backend */
-	do
-	{
-		need_pass = false;
+ retry_login:
+	conn = PQsetdbLogin(pghost,
+			    pgport,
+			    NULL,
+			    NULL,
+			    database,
+			    pguser,
+			    pgpass);
 
-		conn = PQsetdbLogin(host,
-				    port,
-				    NULL,
-				    NULL,
-				    database,
-				    user,
-				    password);
-
-		if (PQstatus(conn) == CONNECTION_BAD &&
-			strcmp(PQerrorMessage(conn), PQnoPasswordSupplied) == 0 &&
-			!feof(stdin))
-		{
-			PQfinish(conn);
-			need_pass = true;
-			free(password);
-			password = NULL;
-			printf("\nPassword: ");
-			password = simple_prompt(password_prompt, 100, false);
-		}
-	} while (need_pass);
-
-	if (password)
-		pgpass = strdup(password);
-
-	/* Check to see that the backend connection was successfully made */
 	if (PQstatus(conn) == CONNECTION_BAD)
 	{
+		/* wait a password if required to login, then retry. */
+		if (strcmp(PQerrorMessage(conn), PQnoPasswordSupplied) == 0 &&
+		    !feof(stdin))
+		{
+			PQfinish(conn);
+			conn = NULL;
+			pgpass = simple_prompt("Password: ", 100, false);
+			goto retry_login;
+		}
+
 		fprintf(stderr, "Connection to database failed: %s",
 			PQerrorMessage(conn));
+
+		PQfinish(conn);
+		conn = NULL;
+
 		return false;
 	}
-	
+
 	return true;
 }
 
