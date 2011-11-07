@@ -12,15 +12,17 @@ How to install
 ==============
 
   Place these files in a directory called 'xlogdump' under 'contrib'
-  in the PostgreSQL source tree. Then run:
+  in the PostgreSQL source tree, and rename 'oid2name-X.Y.Z.txt' file,
+  from the PostgreSQL major version (X.Y) you are going to use,
+  to 'oid2name.txt'.
+
+    cp oid2name-X.Y.Z.txt oid2name.txt
+
+  Then run:
   
+    export USE_PGXS=1
     make
     make install
-
-  Or specify `top_builddir' variable when running make:
-
-    make top_builddir=/path/to/postgresql-9.0.x
-    make top_builddir=/path/to/postgresql-9.0.x install
 
    
 Supported Version
@@ -70,7 +72,9 @@ Options:
   -S, --stats               Collects and shows statistics of the transaction
                             log records from the xlog segments.
   -n, --oid2name            Show object names instead of OIDs with looking up
-                            the system catalogs.
+                            the system catalogs or a cache file.
+  -g, --gen_oid2name        Generate an oid2name cache file (oid2name.out)
+                            by reading the system catalogs.
   -T, --hide-timestamps     Do not print timestamps.
   -?, --help                Show this help.
 
@@ -78,6 +82,7 @@ oid2name supplimental options:
   -h, --host=HOST           database server host or socket directory
   -p, --port=PORT           database server port number
   -U, --user=NAME           database user name to connect
+  -f, --file=FILE           file name to read oid2name cache
 
 
 Bug report

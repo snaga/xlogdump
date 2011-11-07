@@ -99,6 +99,72 @@ cache_put(Oid oid, char *name)
 	return curr->next;
 }
 
+bool
+oid2name_from_file(const char *file)
+{
+	FILE *fp;
+	Oid oid;
+	char name[NAMEDATALEN];
+
+	if ( (fp = fopen(file, "r"))==NULL )
+	{
+		fprintf(stderr, "ERROR: %s not found.\n",  file);
+		return false;
+	}
+
+	printf("NOTICE: Using '%s' as an oid2name cache file.\n", file);
+
+	while ( fscanf(fp, "%d %s", &oid, name)>=2 )
+	{
+	  //		printf("oid=%d, name=%s\n", oid, name);
+		cache_put(oid, name);
+	}
+
+	fclose(fp);
+
+	return true;
+}
+
+bool
+oid2name_to_file(const char *file)
+{
+	const char *oid2name_stmt[] = {
+		"SELECT oid,spcname FROM pg_tablespace ORDER BY oid",
+		"SELECT oid,datname FROM pg_database ORDER BY oid",
+		"SELECT oid,relname FROM pg_class ORDER BY oid"
+	};
+	PGresult *res = NULL;
+	int i, j;
+
+	FILE *fp;
+
+	if ( (fp = fopen(file, "w"))==NULL )
+	{
+		fprintf(stderr, "ERROR: Can't write %s.\n", file);
+		return false;
+	}
+
+	for (i=0 ; i<3 ; i++)
+	{
+		res = PQexec(conn, oid2name_stmt[i]);
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
+			PQclear(res);
+			return false;
+		}
+
+		for (j=0 ; j<PQntuples(res) ; j++)
+			fprintf(fp, "%s %s\n", PQgetvalue(res, j, 0), PQgetvalue(res, j, 1));
+
+		PQclear(res);
+	}
+
+	fclose(fp);
+	return true;
+}
+
 /*
  * Open a database connection
  */

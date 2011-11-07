@@ -683,7 +683,9 @@ help(void)
 	printf("  -S, --stats               Collects and shows statistics of the transaction\n");
 	printf("                            log records from the xlog segments.\n");
 	printf("  -n, --oid2name            Show object names instead of OIDs with looking up\n");
-	printf("                            the system catalogs.\n");
+	printf("                            the system catalogs or a cache file.\n");
+	printf("  -g, --gen_oid2name        Generate an oid2name cache file (oid2name.out)\n");
+	printf("                            by reading the system catalogs.\n");
 	printf("  -T, --hide-timestamps     Do not print timestamps.\n");
 	printf("  -?, --help                Show this help.\n");
 	printf("\n");
@@ -691,6 +693,7 @@ help(void)
 	printf("  -h, --host=HOST           database server host or socket directory\n");
 	printf("  -p, --port=PORT           database server port number\n");
 	printf("  -U, --user=NAME           database user name to connect\n");
+	printf("  -f, --file=FILE           file name to read oid2name cache\n");
 	printf("\n");
 	printf("Report bugs to <satoshi.nagayasu@gmail.com>.\n");
 	exit(0);
@@ -701,9 +704,11 @@ main(int argc, char** argv)
 {
 	int	c, i, optindex;
 	bool oid2name = false;
+	bool oid2name_gen = false;
 	char *pghost = NULL; /* connection host */
 	char *pgport = NULL; /* connection port */
 	char *pguser = NULL; /* connection username */
+	char *oid2name_file = NULL;
 
 	static struct option long_options[] = {
 		{"transactions", no_argument, NULL, 't'},
@@ -712,10 +717,12 @@ main(int argc, char** argv)
 		{"hide-timestamps", no_argument, NULL, 'T'},	
 		{"rmid", required_argument, NULL, 'r'},
 		{"oid2name", no_argument, NULL, 'n'},
+		{"gen_oid2name", no_argument, NULL, 'g'},
 		{"xid", required_argument, NULL, 'x'},
 		{"host", required_argument, NULL, 'h'},
 		{"port", required_argument, NULL, 'p'},
 		{"user", required_argument, NULL, 'U'},
+		{"file", required_argument, NULL, 'f'},
 		{"help", no_argument, NULL, '?'},
 		{NULL, 0, NULL, 0}
 	};
@@ -723,7 +730,12 @@ main(int argc, char** argv)
 	if (argc == 1 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-?"))
 		help();
 
-	while ((c = getopt_long(argc, argv, "sStTnr:x:h:p:U:",
+	pghost = strdup("localhost");
+	pgport = strdup("5432");
+	pguser = getenv("USER");
+	oid2name_file = strdup(DATADIR "/contrib/" OID2NAME_FILE);
+
+	while ((c = getopt_long(argc, argv, "sStTngr:x:h:p:U:f:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -747,6 +759,9 @@ main(int argc, char** argv)
 			case 'n':
 				oid2name = true;
 				break;
+			case 'g':
+				oid2name_gen = true;
+				break;
 			case 'r':			/* output only rmid passed */
 			  	rmid = atoi(optarg);
 				break;
@@ -761,6 +776,9 @@ main(int argc, char** argv)
 				break;
 			case 'U':			/* username for translating oids */
 				pguser = optarg;
+				break;
+			case 'f':
+				oid2name_file = optarg;
 				break;
 			default:
 				fprintf(stderr, "Try \"xlogdump --help\" for more information.\n");
@@ -782,15 +800,26 @@ main(int argc, char** argv)
 
 	if (oid2name)
 	{
-		if (!pghost)
-			pghost = strdup("localhost");
-		if (!pgport)
-			pgport = strdup("5432");
-		if (!pguser)
-			pguser = getenv("USER");
+		oid2name_from_file(oid2name_file);
 
 		if ( !DBConnect(pghost, pgport, "template1", pguser) )
+			fprintf(stderr, "WARNING: Database connection to lookup the system catalog is not available.");
+	}
+
+	/*
+	 * Generate an oid2name cache file.
+	 */
+	if (oid2name_gen)
+	{
+		if ( !DBConnect(pghost, pgport, "template1", pguser) )
 			exit_gracefuly(1);
+
+		if (oid2name_to_file("oid2name.out"))
+		{
+			printf("oid2name.out successfully created.\n");
+		}
+
+		exit_gracefuly(0);
 	}
 
 	for (i = optind; i < argc; i++)

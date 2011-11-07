@@ -10,7 +10,12 @@
 #include "c.h"
 #include "libpq-fe.h"
 
+#define OID2NAME_FILE "oid2name.txt"
+
 bool DBConnect(const char *, const char *, char *, const char *);
+
+bool oid2name_from_file(const char *);
+bool oid2name_to_file(const char *);
 
 char *getSpaceName(uint32, char *, size_t);
 char *getDbName(uint32, char *, size_t);
