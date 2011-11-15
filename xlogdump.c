@@ -800,10 +800,14 @@ main(int argc, char** argv)
 
 	if (oid2name)
 	{
-		oid2name_from_file(oid2name_file);
+		if ( !oid2name_from_file(oid2name_file) )
+		{
+			/* if not found in share/contrib, read from the cwd. */
+			oid2name_from_file(OID2NAME_FILE);
+		}
 
 		if ( !DBConnect(pghost, pgport, "template1", pguser) )
-			fprintf(stderr, "WARNING: Database connection to lookup the system catalog is not available.");
+			fprintf(stderr, "WARNING: Database connection to lookup the system catalog is not available.\n");
 	}
 
 	/*
