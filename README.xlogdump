@@ -12,17 +12,16 @@ How to install
 ==============
 
   Place these files in a directory called 'xlogdump' under 'contrib'
-  in the PostgreSQL source tree, and rename 'oid2name-X.Y.Z.txt' file,
-  from the PostgreSQL major version (X.Y) you are going to use,
-  to 'oid2name.txt'.
+  in the PostgreSQL source tree. Then run:
 
-    cp oid2name-X.Y.Z.txt oid2name.txt
-
-  Then run:
-  
     export USE_PGXS=1
     make
     make install
+
+  Or specify `top_builddir' variable when running make:
+
+    make top_builddir=/path/to/postgresql-9.0.x
+    make top_builddir=/path/to/postgresql-9.0.x install
 
    
 Supported Version
