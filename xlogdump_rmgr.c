@@ -249,6 +249,14 @@ print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 	}
 #endif
 
+#if PG_VERSION_NUM >= 90100
+	case XLOG_RESTORE_POINT:
+	{
+		snprintf(buf, sizeof(buf), "restore point:");
+		break;
+	}
+#endif
+
 	default:
 		snprintf(buf, sizeof(buf), "unknown XLOG operation - %d.", info);
 		break;
