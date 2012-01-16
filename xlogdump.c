@@ -63,17 +63,17 @@ static char		*readRecordBuf = NULL; /* ReadRecord result area */
 static uint32		readRecordBufSize = 0;
 
 /* command-line parameters */
-static bool 		transactions = false; /* when true we just aggregate transaction info */
-static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
-static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
-static bool 		enable_stats = false;   /* collect and show statistics */
-static int 		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
+static bool		transactions = false;	/* when true we just aggregate transaction info */
+static bool		statements = false;	/* when true we try to rebuild fake sql statements with the xlog data */
+static bool		hideTimestamps = false; /* remove timestamp from dump used for testing */
+static bool		enable_stats = false;	/* collect and show statistics */
+static int		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
 static TransactionId	xid = InvalidTransactionId;
 
 /* Buffers to hold objects names */
-static char 		spaceName[NAMEDATALEN] = "";
-static char 		dbName[NAMEDATALEN]  = "";
-static char 		relName[NAMEDATALEN]  = "";
+static char		spaceName[NAMEDATALEN] = "";
+static char		dbName[NAMEDATALEN]  = "";
+static char		relName[NAMEDATALEN]  = "";
 
 
 struct xlog_stats_t {
@@ -86,7 +86,7 @@ struct xlog_stats_t {
 struct xlog_stats_t xlogstats;
 
 /* struct to aggregate transactions */
-transInfoPtr 		transactionsInfo = NULL;
+transInfoPtr		transactionsInfo = NULL;
 
 
 /* prototypes */
