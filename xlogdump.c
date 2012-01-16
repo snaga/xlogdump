@@ -50,15 +50,15 @@
 #include "xlogdump_statement.h"
 #include "xlogdump_oid2name.h"
 
-static int		logFd;		/* kernel FD for current input file */
-static TimeLineID	logTLI;		/* current log file timeline */
-static uint32		logId;		/* current log file id */
-static uint32		logSeg;		/* current log file segment */
-static int32		logPageOff;	/* offset of current page in file */
-static int		logRecOff;	/* offset of next record in page */
+static int		logFd;	       /* kernel FD for current input file */
+static TimeLineID	logTLI;	       /* current log file timeline */
+static uint32		logId;	       /* current log file id */
+static uint32		logSeg;	       /* current log file segment */
+static int32		logPageOff;    /* offset of current page in file */
+static int		logRecOff;     /* offset of next record in page */
 static char		pageBuffer[XLOG_BLCKSZ];	/* current page */
-static XLogRecPtr	curRecPtr;	/* logical address of current record */
-static XLogRecPtr	prevRecPtr;	/* logical address of previous record */
+static XLogRecPtr	curRecPtr;     /* logical address of current record */
+static XLogRecPtr	prevRecPtr;    /* logical address of previous record */
 static char		*readRecordBuf = NULL; /* ReadRecord result area */
 static uint32		readRecordBufSize = 0;
 
@@ -72,8 +72,8 @@ static TransactionId	xid = InvalidTransactionId;
 
 /* Buffers to hold objects names */
 static char		spaceName[NAMEDATALEN] = "";
-static char		dbName[NAMEDATALEN]  = "";
-static char		relName[NAMEDATALEN]  = "";
+static char		dbName[NAMEDATALEN]    = "";
+static char		relName[NAMEDATALEN]   = "";
 
 
 struct xlog_stats_t {
