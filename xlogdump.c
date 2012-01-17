@@ -44,6 +44,7 @@
 #include "pg_config.h"
 #include "pqexpbuffer.h"
 
+#include "strlcat.h"
 #include "xlogdump.h"
 #include "xlogdump_rmgr.h"
 #include "xlogdump_statement.h"
