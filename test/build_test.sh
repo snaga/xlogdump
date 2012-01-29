@@ -1,7 +1,7 @@
 #!/bin/sh
 
 SOURCE_ROOT="/tmp/pgsql/source"
-VERSIONS="9.1.0 9.0.4 8.4.8 8.3.15 8.2.21"
+VERSIONS="9.1.0 9.0.4 8.4.8 8.3.15"
 
 for v in $VERSIONS
   do pushd ${SOURCE_ROOT}/postgresql-${v};

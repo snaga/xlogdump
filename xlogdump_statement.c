@@ -7,28 +7,93 @@
 #include "xlogdump_statement.h"
 
 #include "access/tupmacs.h"
+#include "catalog/pg_type.h"
 #include "storage/bufpage.h"
+#include "utils/datetime.h"
+#include "utils/timestamp.h"
 
 #include "xlogdump_oid2name.h"
 
-static int printField(char *, int, int, uint32);
+static int printValue(const char *, const int, const attrib_t, const uint32);
+
+#if PG_VERSION_NUM < 80400
+ #ifdef HAVE_INT64_TIMESTAMP
+ typedef int64 TimeOffset;
+ #else
+ typedef double TimeOffset;
+ #endif
+#endif
 
 #if PG_VERSION_NUM < 80300
 #define MaxHeapTupleSize  (BLCKSZ - MAXALIGN(sizeof(PageHeaderData)))
 #endif
 
+static void
+dump_xlrecord(const char *data, const int datlen)
+{
+#ifdef DEBUG
+	int i;
+
+	for (i=0 ; i<datlen ; i++)
+	{
+		if ( i%16==0 )
+			printf("\n%4d: ", i);
+		printf("%c(%02x) ", isprint(*(data+i) & 0xff) ? *(data+i) & 0xff : '?', *(data+i) & 0xff);
+	}
+	printf("\n");
+#endif
+}
+
+static void
+print_column_values(char *tupdata, int tuplen, const bits8 *nullBitMap, const xl_heap_header hhead,
+		    const char *op, const char *relname)
+{
+	/* FIXME: 1024 as maximum number of the columns */
+	attrib_t att[1024];
+	int cols;
+	int offset = 0;
+	int i;
+
+	cols = relname2attr_begin(relname);
+		
+	printf("%s: %d row(s) found in the table `%s'.\n", op, cols, relname);
+
+	for (i=0 ; i<cols ; i++)
+	{
+		relname2attr_fetch(i, &att[i]);
+		printf("%s: column %d, name %s, type %d, ", op, i, att[i].attname, att[i].atttypid);
+
+		/* is the attribute value null? */
+		if((hhead.t_infomask & HEAP_HASNULL) && (att_isnull(i, nullBitMap)))
+		{
+			printf("value null\n");
+		}
+		else
+	        {
+			printf("value ");
+			offset = printValue(tupdata, offset, att[i], tuplen);
+			printf("\n");
+
+			if ( offset<0 )
+				break;
+		}
+	}
+	
+	relname2attr_end();
+}
+
 /*
  * Print a insert command that contains all the data on a xl_heap_insert
  */
 void
-printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
+printInsert(xl_heap_insert *xlrecord, const uint32 datalen, const char *relName)
 {
-	char data[MaxHeapTupleSize];
+	char tupdata[MaxHeapTupleSize];
+	char *tup;
 	xl_heap_header hhead;
-	int offset;
 	bits8 nullBitMap[MaxNullBitmapLen];
 
-	MemSet((char *) data, 0, MaxHeapTupleSize * sizeof(char));
+	MemSet((char *) tupdata, 0, MaxHeapTupleSize * sizeof(char));
 	MemSet(nullBitMap, 0, MaxNullBitmapLen);
 	
 	if(datalen > MaxHeapTupleSize)
@@ -38,64 +103,25 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 	   the the heap data into data 
 	   and the tuple null bitmap into nullBitMap */
 	memcpy(&hhead, (char *) xlrecord + SizeOfHeapInsert, SizeOfHeapHeader);
-	memcpy(&data, (char *) xlrecord + hhead.t_hoff - 4, datalen);
-#if PG_VERSION_NUM >= 80300
-	memcpy(&nullBitMap, (bits8 *) xlrecord + SizeOfHeapInsert + SizeOfHeapHeader, BITMAPLEN(HeapTupleHeaderGetNatts(&hhead)) * sizeof(bits8));
-#else
-#warning "Copying null bitmap is not implemented for 8.2.x." /* FIXME: need to fix for 8.2 */
-#endif
+
+	/* FIXME: Why is '+1' needed for offset of the data? */
+	memcpy(&tupdata, (char *) xlrecord + SizeOfHeapInsert + SizeOfHeapHeader + 1, datalen);
+	tup = tupdata;
+
+	memcpy(&nullBitMap,
+	       (bits8 *) xlrecord + SizeOfHeapInsert + SizeOfHeapHeader,
+	       BITMAPLEN(HeapTupleHeaderGetNatts(&hhead)) * sizeof(bits8));
 	
-	printf("INSERT INTO \"%s\" (", relName);
-	
-	// Get relation field names and types
 	if (oid2name_enabled())
 	{
-		int	i, rows = 0, fieldSize = 0;
-		
-		rows = relname2attr_begin(relName);
+		dump_xlrecord(tupdata, datalen);
 
-		for(i = 0; i < rows; i++)
-		{
-			char attname[NAMEDATALEN];
-			Oid atttypid;
-
-			relname2attr_fetch(i, attname, &atttypid);
-
-			printf("%s%s", (i == 0 ? "" : ", "), attname);
-		}
-
-		printf(") VALUES (");
-		offset = 0;
-
-		for(i = 0; i < rows; i++)
-		{
-			char attname[NAMEDATALEN];
-			Oid atttypid;
-
-			relname2attr_fetch(i, attname, &atttypid);
-
-			/* is the attribute value null? */
-			if((hhead.t_infomask & HEAP_HASNULL) && (att_isnull(i, nullBitMap)))
-			{
-				printf("%sNULL", (i == 0 ? "" : ", "));
-			}
-			else
-			{
-				printf("%s'", (i == 0 ? "" : ", "));
-				if(!(fieldSize = printField(data, offset, atttypid, datalen)))
-				{
-					printf("'");
-					break;
-				}
-				else
-					printf("'");
-
-				offset += fieldSize;
-			}
-		}
-		printf(");\n");
-
-		relname2attr_end();
+		// Get relation field names and types
+		print_column_values(tupdata, datalen, nullBitMap, hhead, "INSERT", relName);
+	}
+	else
+	{
+		fprintf(stderr, "ERROR: --statements needs --oid2name to be enabled.\n");
 	}
 }
 
@@ -105,12 +131,12 @@ printInsert(xl_heap_insert *xlrecord, uint32 datalen, const char *relName)
 void
 printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 {
-	char data[MaxHeapTupleSize];
+	char tupdata[MaxHeapTupleSize];
+	char *tup;
 	xl_heap_header hhead;
-	int offset;
 	bits8 nullBitMap[MaxNullBitmapLen];
 
-	MemSet((char *) data, 0, MaxHeapTupleSize * sizeof(char));
+	MemSet((char *) tupdata, 0, MaxHeapTupleSize * sizeof(char));
 	MemSet(nullBitMap, 0, MaxNullBitmapLen);
 	
 	if(datalen > MaxHeapTupleSize)
@@ -120,127 +146,284 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 	   the the heap data into data 
 	   and the tuple null bitmap into nullBitMap */
 	memcpy(&hhead, (char *) xlrecord + SizeOfHeapUpdate, SizeOfHeapHeader);
-	memcpy(&data, (char *) xlrecord + hhead.t_hoff + 4, datalen);
-#if PG_VERSION_NUM >= 80300
-	memcpy(&nullBitMap, (bits8 *) xlrecord + SizeOfHeapUpdate + SizeOfHeapHeader, BITMAPLEN(HeapTupleHeaderGetNatts(&hhead)) * sizeof(bits8));
-#else
-#warning "Copying null bitmap is not implemented for 8.2.x." /* FIXME: need to fix for 8.2 */
-#endif
 
-	printf("UPDATE \"%s\" SET ", relName);
+	/* FIXME: Why is '+1' needed for offset of the data? */
+	memcpy(&tupdata, (char *) xlrecord + SizeOfHeapUpdate + SizeOfHeapHeader + 1, datalen);
+	tup = tupdata;
+
+	memcpy(&nullBitMap,
+	       (bits8 *) xlrecord + SizeOfHeapUpdate + SizeOfHeapHeader,
+	       BITMAPLEN(HeapTupleHeaderGetNatts(&hhead)) * sizeof(bits8));
 
 	// Get relation field names and types
 	if (oid2name_enabled())
 	{
-		int	i, rows = 0, fieldSize = 0;
-		
-		rows = relname2attr_begin(relName);
+		dump_xlrecord(tupdata, datalen);
 
-		offset = 0;
+		// Get relation field names and types
+		print_column_values(tupdata, datalen, nullBitMap, hhead, "UPDATE", relName);
+	}
+	else
+	{
+		fprintf(stderr, "ERROR: --statements needs --oid2name to be enabled.\n");
+	}
+}
 
-		for(i = 0; i < rows; i++)
-		{
-			char attname[NAMEDATALEN];
-			Oid atttypid;
 
-			relname2attr_fetch(i, attname, &atttypid);
+/*
+ * Print the field based on a chunk of xlog data and the field type.
+ * The tuplen is just for error detection on variable length data,
+ * actualy is based on the xlog record total length.
+ */
+static int
+printValue(const char *tup, const int offset, const attrib_t att, const uint32 tuplen)
+{
+	char *data = (char *)tup + offset;
+	int16 int16_val;
+	int32 int32_val;
+	int64 int64_val;
+	float4 float4_val;
+	float8 float8_val;
+	int i;
+	int new_offset = offset;
 
-			printf("%s%s = ", (i == 0 ? "" : ", "), attname);
+	/*
+	 * Calculate new offset if padding exists.
+	 *
+	 * See src/backend/access/common/heaptuple.c:DataFill()
+	 * for more details on how the data is packed.
+	 */
+	if ( att.attbyval=='t' )
+	{
+		new_offset = att_align_nominal(offset, att.attalign);
+		data = (char *)tup + new_offset;
+	}
+	else if (att.attlen == -1 && !VARATT_IS_1B(data) )
+	{
+		/*
+		 * If a varlena has a 4 byte offset for the info bits,
+		 * the offset needs to be re-calculated with an alignment
+		 * prior to reading the info bits itself.
+		 */
+		new_offset = att_align_nominal(offset, att.attalign);
+		data = (char *)tup + new_offset;
+	}
+#ifdef DEBUG
+	printf("(offset=%d, new_offset=%d) ", offset, new_offset);
+#endif
 
-			/* is the attribute value null? */
-			if((hhead.t_infomask & HEAP_HASNULL) && (att_isnull(i, nullBitMap)))
+	// Just print out the value of a specific data type from the data array
+	switch (att.atttypid)
+	{
+		case INT2OID:
+			memcpy(&int16_val, data, sizeof(int16));
+			printf("%d", int16_val);
+			new_offset += sizeof(int16);
+			break;
+
+		case INT4OID:
+		case OIDOID:
+		case REGPROCOID:
+		case XIDOID:
+			memcpy(&int32_val, data, sizeof(int32));
+			printf("%d", int32_val);
+			new_offset += sizeof(int32);
+			break;
+
+		case INT8OID:
+			memcpy(&int64_val, data, sizeof(int64));
+			printf("%lld", int64_val);
+			new_offset += sizeof(int64);
+			break;
+
+		case FLOAT4OID:
+			memcpy(&float4_val, data, sizeof(float4));
+			printf("%f", float4_val);
+			new_offset += sizeof(float4);
+			break;
+
+		case FLOAT8OID:
+			memcpy(&float8_val, data, sizeof(float8));
+			printf("%f", float8_val);
+			new_offset += sizeof(float8);
+			break;
+
+		case CHAROID:
+			printf("%d", *data);
+			new_offset += sizeof(char);
+			break;
+
+		case VARCHAROID:
+		case TEXTOID:
+		case BPCHAROID: /* blank-packed char == char(X) */
+		  {
+			char *ptr;
+			int len;
+
+			i = 0;
+
+			len = VARSIZE_ANY(data);
+			ptr = VARDATA_ANY(data);
+
+#ifdef DEBUG
+			printf("(varatt_is_4b=%d, varatt_is_1b=%d, ",
+			       VARATT_IS_4B(data),
+			       VARATT_IS_1B(data));
+			printf("len=%d, tuplen=%d) ", len, tuplen);
+#endif
+
+			if ( VARATT_IS_4B(data) )
 			{
-				printf("NULL");
+				i += 4;
+#ifdef DEBUG
+				printf("(%02x %02x %02x %02x) ", *(data), *(data+1), *(data+2), *(data+3));
+#endif
 			}
 			else
 			{
-				printf("'");
-				if(!(fieldSize = printField(data, offset, atttypid, datalen)))
-					break;
-
-				printf("'");
-				offset += fieldSize;
+				i += 1;
+#ifdef DEBUG
+				printf("(%02x) ", *(data));
+#endif
 			}
-		}
-		printf(" WHERE ... ;\n");
 
-		relname2attr_end();
-	}
-}
-
-/*
- * Print the field based on a chunk of xlog data and the field type
- * The maxfield len is just for error detection on variable length data,
- * actualy is based on the xlog record total lenght
- */
-static int
-printField(char *data, int offset, int type, uint32 maxFieldLen)
-{
-	int32 i, size;
-	int64 bigint;
-	int16 smallint;
-	float4 floatNumber;
-	float8 doubleNumber;
-	Oid objectId;
-	
-	// Just print out the value of a specific data type from the data array
-	switch(type)
-	{
-		case 700: //float4
-			memcpy(&floatNumber, &data[offset], sizeof(float4));
-			printf("%f", floatNumber);
-			return sizeof(float4);
-		case 701: //float8
-			memcpy(&doubleNumber, &data[offset], sizeof(float8));
-			printf("%f", doubleNumber);
-			return sizeof(float8);
-		case 16: //boolean
-			printf("%c", (data[offset] == 0 ? 'f' : 't'));
-			return MAXALIGN(sizeof(bool));
-		case 1043: //varchar
-		case 1042: //bpchar
-		case 25: //text
-		case 18: //char
-			memcpy(&size, &data[offset], sizeof(int32));
-			//@todo usar putc
-			if(size > maxFieldLen || size < 0)
+			if (len<0 || tuplen<len)
 			{
-				fprintf(stderr, "ERROR: Invalid field size\n");
-				return 0;
+				fprintf(stderr, "ERROR: Invalid field len\n");
+				new_offset += tuplen;
+				break;
 			}
-			for(i = sizeof(int32); i < size; i++)
-				printf("%c", data[offset + i]);
+
+			printf("'");
+			for (; i<len ; i++)
+			{
+				if ( *(data+i)=='\0' )
+					break;
+				printf("%c", *(data+i));
+			}
+			printf("'");
+
+			new_offset += len;
+			break;
+		  }
+
+		case NAMEOID:
+			for(i = 0; i < NAMEDATALEN && *(data+i) != '\0'; i++)
+				printf("%c", *(data+i));
 				
-			//return ( (size % sizeof(int)) ? size + sizeof(int) - (size % sizeof(int)):size);
-			return MAXALIGN(size * sizeof(char));
-		case 19: //name
-			for(i = 0; i < NAMEDATALEN && data[offset + i] != '\0'; i++)
-				printf("%c", data[offset + i]);
-				
-			return NAMEDATALEN;
-		case 21: //smallint
-			memcpy(&smallint, &data[offset], sizeof(int16));
-			printf("%i", (int) smallint);
-			return sizeof(int16);
-		case 23: //int
-			memcpy(&i, &data[offset], sizeof(int32));
-			printf("%i", i);
-			return sizeof(int32);
-		case 26: //oid
-			memcpy(&objectId, &data[offset], sizeof(Oid));
-			printf("%i", (int) objectId);
-			return sizeof(Oid);
-		case 20: //bigint
-			//@todo como imprimir int64?
-			memcpy(&bigint, &data[offset], sizeof(int64));
-			printf("%i", (int) bigint);
-			return sizeof(int64);
-		case 1005: //int2vector
-			memcpy(&size, &data[offset], sizeof(int32));
-			return MAXALIGN(size);
+			new_offset += NAMEDATALEN;
+			break;
+
+		case BOOLOID:
+			printf("%c", (*data == 0 ? 'f' : 't'));
+			new_offset += sizeof(bool);
+			break;
+
+		case TIMESTAMPOID:
+		  {
+			int y,m,d;
+			int hh,mm,ss;
+			fsec_t ff;
+			Timestamp date;
+			Timestamp time;
+
+			memcpy(&time, data, sizeof(Timestamp));
+#ifdef __DEBUG
+			printf("(ts=%f) ", time);
+#endif
+
+			TMODULO(time, date, (double) SECS_PER_DAY);
+#ifdef __DEBUG
+#ifdef HAVE_INT64_TIMESTAMP
+			printf("(date=%lld, time=%lld) ", date, time);
+#else
+			printf("(date=%f, time=%f) ", date, time);
+#endif
+#endif
+
+			date += POSTGRES_EPOCH_JDATE;
+
+			j2date(date, &y, &m, &d);
+			dt2time(time, &hh, &mm, &ss, &ff);
+
+			printf("%04d-%02d-%02d ", y, m, d);
+#ifdef HAVE_INT64_TIMESTAMP
+			printf("%02d:%02d:%02d.%d", hh, mm, ss, ff);
+#else
+			printf("%02d:%02d:%02.6f", hh, mm, ss+ff);
+#endif
+
+			new_offset += sizeof(Timestamp);
+			break;
+		  }
+
+		default:
+			printf("(unsupported type %d)", att.atttypid);
+			if ( att.attlen>0 )
+				new_offset += att.attlen;
+			else
+				new_offset = -1;
+		  	break;
 			
 	}
-	return 0;
+
+	return new_offset;
 }
 
 
+/*
+ * src/backend/utils/adt/datetime.c
+ */
+void
+j2date(int jd, int *year, int *month, int *day)
+{
+	unsigned int julian;
+	unsigned int quad;
+	unsigned int extra;
+	int			y;
+
+	julian = jd;
+	julian += 32044;
+	quad = julian / 146097;
+	extra = (julian - quad * 146097) * 4 + 3;
+	julian += 60 + quad * 3 + extra / 146097;
+	quad = julian / 1461;
+	julian -= quad * 1461;
+	y = julian * 4 / 1461;
+	julian = ((y != 0) ? ((julian + 305) % 365) : ((julian + 306) % 366))
+	  + 123;
+	y += quad * 4;
+	*year = y - 4800;
+	quad = julian * 2141 / 65536;
+	*day = julian - 7834 * quad / 256;
+	*month = (quad + 10) % 12 + 1;
+	
+	return;
+}	/* j2date() */
+
+/*
+ * src/backend/utils/adt/timestamp.c
+ */
+void
+dt2time(Timestamp jd, int *hour, int *min, int *sec, fsec_t *fsec)
+{
+	TimeOffset      time;
+
+	time = jd;
+
+#ifdef HAVE_INT64_TIMESTAMP
+	*hour = time / USECS_PER_HOUR;
+	time -= (*hour) * USECS_PER_HOUR;
+	*min = time / USECS_PER_MINUTE;
+	time -= (*min) * USECS_PER_MINUTE;
+	*sec = time / USECS_PER_SEC;
+	*fsec = time - (*sec * USECS_PER_SEC);
+#else
+	*hour = time / SECS_PER_HOUR;
+	time -= (*hour) * SECS_PER_HOUR;
+	*min = time / SECS_PER_MINUTE;
+	time -= (*min) * SECS_PER_MINUTE;
+	*sec = time;
+	*fsec = time - *sec;
+#endif
+}       /* dt2time() */

@@ -13,6 +13,14 @@
 /* Maximum size of a null bitmap based on max number of attributes per tuple */
 #define MaxNullBitmapLen	BITMAPLEN(MaxTupleAttributeNumber)
 
+typedef struct attrib_t {
+	Oid atttypid;
+	char attname[NAMEDATALEN];
+	int attlen;
+	char attbyval;
+	char attalign;
+} attrib_t;
+
 void printInsert(xl_heap_insert *, uint32, const char *);
 void printUpdate(xl_heap_update *, uint32, const char *);
 

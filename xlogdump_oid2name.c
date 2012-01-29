@@ -363,7 +363,7 @@ relname2attr_begin(const char *relname)
 	if ( _res!=NULL )
 		PQclear(_res);
 
-	snprintf(dbQry, sizeof(dbQry), "SELECT attname, atttypid FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
+	snprintf(dbQry, sizeof(dbQry), "SELECT attname, atttypid, attlen, attbyval, attalign FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
 	_res = PQexec(lastDbConn, dbQry);
 	if (PQresultStatus(_res) != PGRES_TUPLES_OK)
 	{
@@ -377,10 +377,14 @@ relname2attr_begin(const char *relname)
 }
 
 int
-relname2attr_fetch(int i, char *attname, Oid *atttypid)
+relname2attr_fetch(int i, attrib_t *att)
 {
-	snprintf(attname, NAMEDATALEN, "%s", PQgetvalue(_res, i, 0));
-	*atttypid = atoi( PQgetvalue(_res, i, 1) );
+	snprintf(att->attname, NAMEDATALEN, "%s", PQgetvalue(_res, i, 0));
+	att->atttypid = atoi( PQgetvalue(_res, i, 1) );
+	att->attlen   = atoi( PQgetvalue(_res, i, 2) );
+	att->attbyval = *(PQgetvalue(_res, i, 3));
+	att->attalign = *(PQgetvalue(_res, i, 4));
+
 	return i;
 }
 
