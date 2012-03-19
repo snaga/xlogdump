@@ -44,35 +44,36 @@
 #include "pg_config.h"
 #include "pqexpbuffer.h"
 
+#include "strlcat.h"
 #include "xlogdump.h"
 #include "xlogdump_rmgr.h"
 #include "xlogdump_statement.h"
 #include "xlogdump_oid2name.h"
 
-static int		logFd;		/* kernel FD for current input file */
-static TimeLineID	logTLI;		/* current log file timeline */
-static uint32		logId;		/* current log file id */
-static uint32		logSeg;		/* current log file segment */
-static int32		logPageOff;	/* offset of current page in file */
-static int		logRecOff;	/* offset of next record in page */
+static int		logFd;	       /* kernel FD for current input file */
+static TimeLineID	logTLI;	       /* current log file timeline */
+static uint32		logId;	       /* current log file id */
+static uint32		logSeg;	       /* current log file segment */
+static int32		logPageOff;    /* offset of current page in file */
+static int		logRecOff;     /* offset of next record in page */
 static char		pageBuffer[XLOG_BLCKSZ];	/* current page */
-static XLogRecPtr	curRecPtr;	/* logical address of current record */
-static XLogRecPtr	prevRecPtr;	/* logical address of previous record */
+static XLogRecPtr	curRecPtr;     /* logical address of current record */
+static XLogRecPtr	prevRecPtr;    /* logical address of previous record */
 static char		*readRecordBuf = NULL; /* ReadRecord result area */
 static uint32		readRecordBufSize = 0;
 
 /* command-line parameters */
-static bool 		transactions = false; /* when true we just aggregate transaction info */
-static bool 		statements = false; /* when true we try to rebuild fake sql statements with the xlog data */
-static bool 		hideTimestamps = false; /* remove timestamp from dump used for testing */
-static bool 		enable_stats = false;   /* collect and show statistics */
-static int 		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
+static bool		transactions = false;	/* when true we just aggregate transaction info */
+static bool		statements = false;	/* when true we try to rebuild fake sql statements with the xlog data */
+static bool		hideTimestamps = false; /* remove timestamp from dump used for testing */
+static bool		enable_stats = false;	/* collect and show statistics */
+static int		rmid = -1;		/* print all RM's xlog records if rmid has negative value. */
 static TransactionId	xid = InvalidTransactionId;
 
 /* Buffers to hold objects names */
-static char 		spaceName[NAMEDATALEN] = "";
-static char 		dbName[NAMEDATALEN]  = "";
-static char 		relName[NAMEDATALEN]  = "";
+static char		spaceName[NAMEDATALEN] = "";
+static char		dbName[NAMEDATALEN]    = "";
+static char		relName[NAMEDATALEN]   = "";
 
 
 struct xlog_stats_t {
@@ -85,7 +86,7 @@ struct xlog_stats_t {
 struct xlog_stats_t xlogstats;
 
 /* struct to aggregate transactions */
-transInfoPtr 		transactionsInfo = NULL;
+transInfoPtr		transactionsInfo = NULL;
 
 
 /* prototypes */
@@ -313,12 +314,13 @@ restart:
 		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
 		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
 	{
-		printf("invalid record length(expected %u ~ %u, actual %d) at %X/%X\n",
-				(unsigned int)SizeOfXLogRecord + record->xl_len,
-				(unsigned int)SizeOfXLogRecord + record->xl_len +
-					XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ),
-				record->xl_tot_len,
-			   curRecPtr.xlogid, curRecPtr.xrecoff);
+		printf(
+			"invalid record length(expected %lu ~ %lu, actual %d) at %X/%X\n",
+			(unsigned long) (SizeOfXLogRecord + record->xl_len),
+			(unsigned long) (SizeOfXLogRecord + record->xl_len +
+							 XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ)),
+			record->xl_tot_len,
+			curRecPtr.xlogid, curRecPtr.xrecoff);
 		return false;
 	}
 	total_len = record->xl_tot_len;

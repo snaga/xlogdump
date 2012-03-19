@@ -655,10 +655,10 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, bool statements)
 					header->t_hoff);
 #endif
 
-				strncat(buf, buf2, sizeof(buf));
+				strlcat(buf, buf2, sizeof(buf));
 			}
 			else
-				strncat(buf, " header: none", sizeof(buf));
+				strlcat(buf, " header: none", sizeof(buf));
 
 			rmgr_stats.heap_insert++;
 			break;
@@ -938,7 +938,7 @@ print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			datapos += sizeof(OffsetNumber);
 
 			snprintf(buf2, sizeof(buf2), " newitemoff: %u", newitemoff);
-			strncat(buf, buf2, sizeof(buf));
+			strlcat(buf, buf2, sizeof(buf));
 
 			/* newitem (only when bkpblock1 is not recorded) */
 			if (!(record->xl_info & XLR_BKP_BLOCK_1))
@@ -947,7 +947,7 @@ print_rmgr_btree(XLogRecPtr cur, XLogRecord *record, uint8 info)
 				snprintf(buf2, sizeof(buf2), " newitem: { block %u pos 0x%x }",
 					BlockIdGetBlockNumber(&newitem->t_tid.ip_blkid),
 					newitem->t_tid.ip_posid);
-				strncat(buf, buf2, sizeof(buf));
+				strlcat(buf, buf2, sizeof(buf));
 			}
 			/* items in right page should be here */
 			break;
