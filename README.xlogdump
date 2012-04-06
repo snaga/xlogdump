@@ -11,8 +11,13 @@ What's `xlogdump'?
 How to install
 ==============
 
-  Place these files in a directory called 'xlogdump' under 'contrib'
-  in the PostgreSQL source tree. Then run:
+  Before you build xlogdump yourself, you need to have a PostgreSQL
+  source tree, and build it to get several object files required to
+  build a xlogdump executable.
+
+  After building PostgreSQL, place a xlogdump source tree in
+  a directory called 'xlogdump' under 'contrib' in the PostgreSQL
+  source tree. Then run:
 
     export USE_PGXS=1
     make
@@ -33,7 +38,6 @@ Supported Version
   - PostgreSQL 9.0.x
   - PostgreSQL 8.4.x
   - PostgreSQL 8.3.x
-  - PostgreSQL 8.2.x
 
 
 Usage
