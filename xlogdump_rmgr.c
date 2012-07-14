@@ -5,6 +5,7 @@
  * by each resource manager.
  */
 #include "xlogdump_rmgr.h"
+#include "xlogdump.h"
 
 #include <time.h>
 
@@ -44,7 +45,10 @@ const char * const RM_names[RM_MAX_ID+1] = {
 	"Hash",						/* 12 */
 	"Gin",						/* 13 */
 	"Gist",						/* 14 */
-	"Sequence"					/* 15 */
+	"Sequence",					/* 15 */
+#if PG_VERSION_NUM >=90200
+	"SPGist"					/* 16 */
+#endif
 };
 
 /* copy from utils/timestamp.h */
@@ -158,14 +162,8 @@ print_rmgr_record(XLogRecPtr cur, XLogRecord *rec, const char *detail)
 	if (!dump_enabled)
 		return;
 
-	printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s\n",
-	       cur.xlogid, cur.xrecoff,
-	       rec->xl_xid,
-	       rec->xl_rmid,
-	       RM_names[rec->xl_rmid],
-	       rec->xl_len, rec->xl_tot_len,
-	       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
-	       detail);
+	PRINT_XLOGRECORD_HEADER(cur, rec);
+	printf("%s\n", detail);
 }
 
 void
@@ -253,6 +251,14 @@ print_rmgr_xlog(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 	case XLOG_RESTORE_POINT:
 	{
 		snprintf(buf, sizeof(buf), "restore point:");
+		break;
+	}
+#endif
+
+#if PG_VERSION_NUM >= 90200
+	case XLOG_FPW_CHANGE:
+	{
+		snprintf(buf, sizeof(buf), "full_page_write changed:");
 		break;
 	}
 #endif
@@ -365,6 +371,25 @@ print_rmgr_xact(XLogRecPtr cur, XLogRecord *record, uint8 info, bool hideTimesta
 		snprintf(buf, sizeof(buf), "assignment xtop:%d, nsubxacts:%d",
 			 xlrec.xtop,
 			 xlrec.nsubxacts);
+		}
+		break;
+#endif
+
+#if PG_VERSION_NUM >= 90200
+	case XLOG_XACT_COMMIT_COMPACT:
+		{
+		xl_xact_commit_compact	xlrec;
+
+		memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+#ifdef HAVE_INT64_TIMESTAMP
+		snprintf(buf, sizeof(buf), "commit_compact xact_time:" INT64_FORMAT ", nsubxacts:%d",
+			 xlrec.xact_time,
+			 xlrec.nsubxacts);
+#else
+		snprintf(buf, sizeof(buf), "commit_compact xact_time:%f, nsubxacts:%d",
+			 xlrec.xact_time,
+			 xlrec.nsubxacts);
+#endif
 		}
 		break;
 #endif
@@ -595,6 +620,20 @@ print_rmgr_heap2(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			snprintf(buf, sizeof(buf), "cleanup_info: s/d/r:%s/%s/%s removed xid:%d",
 				 spaceName, dbName, relName,
 				 xlrec.latestRemovedXid);
+		}
+		break;
+#endif
+
+#if PG_VERSION_NUM >= 90200
+		case XLOG_HEAP2_VISIBLE:
+		{
+			snprintf(buf, sizeof(buf), "heap2_visible:");
+		}
+		break;
+
+		case XLOG_HEAP2_MULTI_INSERT:
+		{
+			snprintf(buf, sizeof(buf), "heap2_multi_insert:");
 		}
 		break;
 #endif

@@ -158,6 +158,29 @@ readXLogPage(void)
 			printf("Bogus page magic number %04X at offset %X\n",
 				   ((XLogPageHeader) pageBuffer)->xlp_magic, logPageOff);
 		}
+
+		/*
+		 * FIXME: check xlp_magic here.
+		 */
+		if (!enable_stats)
+		{
+			printf("[page:%d, xlp_info:%d, xlp_tli:%d, xlp_pageaddr:%X/%X] ",
+			       logPageOff / XLOG_BLCKSZ,
+			       ((XLogPageHeader) pageBuffer)->xlp_info,
+			       ((XLogPageHeader) pageBuffer)->xlp_tli,
+			       ((XLogPageHeader) pageBuffer)->xlp_pageaddr.xlogid,
+			       ((XLogPageHeader) pageBuffer)->xlp_pageaddr.xrecoff);
+			
+			if ( (((XLogPageHeader)pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD) )
+				printf("XLP_FIRST_IS_CONTRECORD ");
+			if ((((XLogPageHeader)pageBuffer)->xlp_info & XLP_LONG_HEADER) )
+				printf("XLP_LONG_HEADER ");
+			if ((((XLogPageHeader)pageBuffer)->xlp_info & XLP_BKP_REMOVABLE) )
+				printf("XLP_BKP_REMOVABLE ");
+			
+			printf("\n");
+		}
+
 		return true;
 	}
 	if (nread != 0)
@@ -546,14 +569,10 @@ print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
 		blk += sizeof(BkpBlock) + (BLCKSZ - bkb.hole_length);
 
 		if (!enable_stats)
-			printf("[cur:%u/%X, xid:%d, rmid:%d(%s), len:%d/%d, prev:%u/%X] %s",
-			       cur.xlogid, cur.xrecoff,
-			       rec->xl_xid,
-			       rec->xl_rmid,
-			       RM_names[rec->xl_rmid],
-			       rec->xl_len, rec->xl_tot_len,
-			       rec->xl_prev.xlogid, rec->xl_prev.xrecoff, 
-			       buf);
+		{
+			PRINT_XLOGRECORD_HEADER(cur, rec);
+			printf("%s", buf);
+		}
 
 		xlogstats.bkpblock_count++;
 		xlogstats.bkpblock_len += (BLCKSZ - bkb.hole_length);
