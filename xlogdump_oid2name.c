@@ -36,7 +36,9 @@ struct oid2name_t *oid2name_table = NULL;
 
 static char *cache_get(Oid);
 static struct oid2name_t *cache_put(Oid, char *);
+
 static bool oid2name_query(char *, size_t, const char *);
+static bool oid2name_get_name(uint32, char *, size_t, const char *);
 
 /*
  * cache_get()
@@ -237,6 +239,25 @@ oid2name_query(char *buf, size_t buflen, const char *query)
 	return false;
 }
 
+static bool
+oid2name_get_name(uint32 oid, char *buf, size_t buflen, const char *query)
+{
+	if (cache_get(oid))
+	{
+		snprintf(buf, buflen, "%s", cache_get(oid));
+		return true;
+	}
+
+	if ( oid2name_query(buf, buflen, query) )
+	{
+		cache_put(oid, buf);
+		return true;
+	}
+
+	snprintf(buf, buflen, "%u", oid);
+	return false;
+}
+
 /*
  * Atempt to read the name of tablespace into lastSpcName
  * (if there's a database connection and the oid changed since lastSpcOid)
@@ -246,22 +267,9 @@ getSpaceName(uint32 spcid, char *buf, size_t buflen)
 {
 	char dbQry[1024];
 
-	if (cache_get(spcid))
-	{
-		snprintf(buf, buflen, "%s", cache_get(spcid));
-		return buf;
-	}
-
 	snprintf(dbQry, sizeof(dbQry), "SELECT spcname FROM pg_tablespace WHERE oid = %i", spcid);
 
-	if ( oid2name_query(buf, buflen, dbQry) )
-	{
-		cache_put(spcid, buf);
-	}
-	else
-	{
-		snprintf(buf, buflen, "%u", spcid);
-	}
+	oid2name_get_name(spcid, buf, buflen, dbQry);
 
 	return buf;
 }
@@ -275,28 +283,16 @@ getDbName(uint32 dbid, char *buf, size_t buflen)
 {
 	char dbQry[1024];
 
-	if (cache_get(dbid))
-	{
-		snprintf(buf, buflen, "%s", cache_get(dbid));
-		return buf;
-	}
-
 	snprintf(dbQry, sizeof(dbQry), "SELECT datname FROM pg_database WHERE oid = %i", dbid);
 
-	if ( oid2name_query(buf, buflen, dbQry) )
+	if ( oid2name_get_name(dbid, buf, buflen, dbQry) )
 	{
-		cache_put(dbid, buf);
-
 		/*
 		 * Need to keep name of the database going to be connected
 		 * in order to retreive object names (tables, indexes, ...)
 		 * at the next step, particularly in getRelName().
 		 */
 		strncpy(dbName, buf, sizeof(dbName));
-	}
-	else
-	{
-		snprintf(buf, buflen, "%u", dbid);
 	}
 
 	return buf;
@@ -311,6 +307,10 @@ char *
 getRelName(uint32 relid, char *buf, size_t buflen)
 {
 	char dbQry[1024];
+
+	/* Try the relfilenode and oid just in case the filenode has changed
+	   If it has changed more than once we can't translate it's name */
+	snprintf(dbQry, sizeof(dbQry), "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
 
 	if (cache_get(relid))
 	{
@@ -336,18 +336,7 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 				    dbName, pguser, pgpass);
 	}
 
-	/* Try the relfilenode and oid just in case the filenode has changed
-	   If it has changed more than once we can't translate it's name */
-	snprintf(dbQry, sizeof(dbQry), "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
-
-	if ( oid2name_query(buf, buflen, dbQry) )
-	{
-		cache_put(relid, buf);
-	}
-	else
-	{
-		snprintf(buf, buflen, "%u", relid);
-	}
+	oid2name_get_name(relid, buf, buflen, dbQry);
 
 	return buf;
 }
