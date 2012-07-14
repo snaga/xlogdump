@@ -232,7 +232,7 @@ printValue(const char *tup, const int offset, const attrib_t att, const uint32 t
 
 		case INT8OID:
 			memcpy(&int64_val, data, sizeof(int64));
-			printf("%lld", int64_val);
+			printf(INT64_FORMAT, int64_val);
 			new_offset += sizeof(int64);
 			break;
 
