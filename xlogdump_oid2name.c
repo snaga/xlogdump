@@ -324,7 +324,7 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 	 * to the different database in order to retreive a object name
 	 * from the system catalog.
 	 */
-	if (strcmp(PQdb(conn), dbName) != 0)
+	if (conn && strcmp(PQdb(conn), dbName) != 0)
 	{
 		/*
 		 * Re-connect to the different database.
