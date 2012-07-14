@@ -10,9 +10,10 @@
 #include "postgres.h"
 
 static PGconn		*conn = NULL; /* Connection for translating oids of global objects */
-static PGconn		*lastDbConn = NULL; /* Connection for translating oids of per database objects */
 
 static PGresult		*_res = NULL; /* a result set variable for relname2attr_*() functions */
+
+static char dbName[NAMEDATALEN];
 
 static char *pghost = NULL;
 static char *pgport = NULL;
@@ -35,6 +36,7 @@ struct oid2name_t *oid2name_table = NULL;
 
 static char *cache_get(Oid);
 static struct oid2name_t *cache_put(Oid, char *);
+static bool oid2name_query(char *, size_t, const char *);
 
 /*
  * cache_get()
@@ -209,47 +211,57 @@ DBConnect(const char *host, const char *port, char *database, const char *user)
 	return true;
 }
 
+static bool
+oid2name_query(char *buf, size_t buflen, const char *query)
+{
+	PGresult *res = NULL;
+
+	if (!conn)
+		return false;
+
+	res = PQexec(conn, query);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
+		PQclear(res);
+		return false;
+	}
+	if (PQntuples(res) > 0)
+	{
+		strncpy(buf, PQgetvalue(res, 0, 0), buflen);
+		PQclear(res);
+		return true;
+	}
+
+	PQclear(res);
+	return false;
+}
+
 /*
  * Atempt to read the name of tablespace into lastSpcName
  * (if there's a database connection and the oid changed since lastSpcOid)
  */
 char *
-getSpaceName(uint32 space, char *buf, size_t buflen)
+getSpaceName(uint32 spcid, char *buf, size_t buflen)
 {
 	char dbQry[1024];
-	PGresult *res = NULL;
 
-	if (cache_get(space))
+	if (cache_get(spcid))
 	{
-		snprintf(buf, buflen, "%s", cache_get(space));
+		snprintf(buf, buflen, "%s", cache_get(spcid));
 		return buf;
 	}
 
-	if (conn)
+	snprintf(dbQry, sizeof(dbQry), "SELECT spcname FROM pg_tablespace WHERE oid = %i", spcid);
+
+	if ( oid2name_query(buf, buflen, dbQry) )
 	{
-		//		printf("DEBUG: getSpaceName: SELECT spcname FROM pg_tablespace WHERE oid = %i\n", space);
-		snprintf(dbQry, sizeof(dbQry), "SELECT spcname FROM pg_tablespace WHERE oid = %i", space);
-		res = PQexec(conn, dbQry);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			return NULL;
-		}
-		if(PQntuples(res) > 0)
-		{
-			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
-			//			printf("DEBUG: getSpaceName: spcname = %s\n", buf);
-			cache_put(space, buf);
-			PQclear(res);
-			return buf;
-		}
+		cache_put(spcid, buf);
 	}
-
-	PQclear(res);
-
-	/* Didn't find the name, return string with oid */
-	snprintf(buf, buflen, "%u", space);
+	else
+	{
+		snprintf(buf, buflen, "%u", spcid);
+	}
 
 	return buf;
 }
@@ -259,54 +271,34 @@ getSpaceName(uint32 space, char *buf, size_t buflen)
  * Atempt to get the name of database (if there's a database connection)
  */
 char *
-getDbName(uint32 db, char *buf, size_t buflen)
+getDbName(uint32 dbid, char *buf, size_t buflen)
 {
 	char dbQry[1024];
-	PGresult *res = NULL;
 
-	if (cache_get(db))
+	if (cache_get(dbid))
 	{
-		snprintf(buf, buflen, "%s", cache_get(db));
+		snprintf(buf, buflen, "%s", cache_get(dbid));
 		return buf;
 	}
 
-	if (conn)
-	{	
-		snprintf(dbQry, sizeof(dbQry), "SELECT datname FROM pg_database WHERE oid = %i", db);
-		res = PQexec(conn, dbQry);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			return NULL;
-		}
-		if(PQntuples(res) > 0)
-		{
-			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
+	snprintf(dbQry, sizeof(dbQry), "SELECT datname FROM pg_database WHERE oid = %i", dbid);
 
-			cache_put(db, buf);
+	if ( oid2name_query(buf, buflen, dbQry) )
+	{
+		cache_put(dbid, buf);
 
-			// Database changed makes new connection
-			if (lastDbConn)
-				PQfinish(lastDbConn);
-
-			lastDbConn = PQsetdbLogin(pghost,
-						  pgport,
-						  NULL,
-						  NULL,
-						  buf,
-						  pguser,
-						  pgpass);
-
-			PQclear(res);
-			return buf;
-		}
+		/*
+		 * Need to keep name of the database going to be connected
+		 * in order to retreive object names (tables, indexes, ...)
+		 * at the next step, particularly in getRelName().
+		 */
+		strncpy(dbName, buf, sizeof(dbName));
+	}
+	else
+	{
+		snprintf(buf, buflen, "%u", dbid);
 	}
 
-	PQclear(res);
-
-	/* Didn't find the name, return string with oid */
-	snprintf(buf, buflen, "%u", db);
 	return buf;
 }
 
@@ -319,7 +311,6 @@ char *
 getRelName(uint32 relid, char *buf, size_t buflen)
 {
 	char dbQry[1024];
-	PGresult *res = NULL;
 
 	if (cache_get(relid))
 	{
@@ -327,31 +318,37 @@ getRelName(uint32 relid, char *buf, size_t buflen)
 		return buf;
 	}
 
-	if (conn && lastDbConn)
+	/*
+	 * If the xlog record has some information about rmgr operation on
+	 * a different database, it needs to establish a new connection
+	 * to the different database in order to retreive a object name
+	 * from the system catalog.
+	 */
+	if (strcmp(PQdb(conn), dbName) != 0)
 	{
-		/* Try the relfilenode and oid just in case the filenode has changed
-		   If it has changed more than once we can't translate it's name */
-		snprintf(dbQry, sizeof(dbQry), "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
-		res = PQexec(lastDbConn, dbQry);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
-			PQclear(res);
-			return NULL;
-		}
-		if(PQntuples(res) > 0)
-		{
-			strncpy(buf, PQgetvalue(res, 0, 0), buflen);
-			cache_put(relid, buf);
-			PQclear(res);
-			return buf;
-		}
+		/*
+		 * Re-connect to the different database.
+		 */
+		if (conn)
+			PQfinish(conn);
+
+		conn = PQsetdbLogin(pghost, pgport, NULL, NULL,
+				    dbName, pguser, pgpass);
 	}
 
-	PQclear(res);
-	
-	/* Didn't find the name, return string with oid */
-	snprintf(buf, buflen, "%u", relid);
+	/* Try the relfilenode and oid just in case the filenode has changed
+	   If it has changed more than once we can't translate it's name */
+	snprintf(dbQry, sizeof(dbQry), "SELECT relname, oid FROM pg_class WHERE relfilenode = %i OR oid = %i", relid, relid);
+
+	if ( oid2name_query(buf, buflen, dbQry) )
+	{
+		cache_put(relid, buf);
+	}
+	else
+	{
+		snprintf(buf, buflen, "%u", relid);
+	}
+
 	return buf;
 }
 
@@ -364,7 +361,7 @@ relname2attr_begin(const char *relname)
 		PQclear(_res);
 
 	snprintf(dbQry, sizeof(dbQry), "SELECT attname, atttypid, attlen, attbyval, attalign FROM pg_attribute a, pg_class c WHERE attnum > 0 AND attrelid = c.oid AND c.relname='%s' ORDER BY attnum", relname);
-	_res = PQexec(lastDbConn, dbQry);
+	_res = PQexec(conn, dbQry);
 	if (PQresultStatus(_res) != PGRES_TUPLES_OK)
 	{
 		fprintf(stderr, "SELECT FAILED: %s", PQerrorMessage(conn));
@@ -404,9 +401,6 @@ oid2name_enabled(void)
 void
 DBDisconnect(void)
 {
-	if(lastDbConn)
-		PQfinish(lastDbConn);
-	if(conn)
+	if (conn)
 		PQfinish(conn);
-
 }
