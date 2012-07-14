@@ -175,8 +175,10 @@ readXLogPage(void)
 				printf("XLP_FIRST_IS_CONTRECORD ");
 			if ((((XLogPageHeader)pageBuffer)->xlp_info & XLP_LONG_HEADER) )
 				printf("XLP_LONG_HEADER ");
+#if PG_VERSION_NUM >= 90200
 			if ((((XLogPageHeader)pageBuffer)->xlp_info & XLP_BKP_REMOVABLE) )
 				printf("XLP_BKP_REMOVABLE ");
+#endif
 			
 			printf("\n");
 		}

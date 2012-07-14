@@ -11,22 +11,18 @@ What's `xlogdump'?
 How to install
 ==============
 
-  Before you build xlogdump yourself, you need to have a PostgreSQL
-  source tree, and build it to get several object files required to
-  build a xlogdump executable.
+  To build xlogdump, you don't need to have any PostgreSQL source
+  tree. You can build xlogdump with using pgxs, header files, and
+  shared libraries.
 
-  After building PostgreSQL, place a xlogdump source tree in
-  a directory called 'xlogdump' under 'contrib' in the PostgreSQL
-  source tree. Then run:
+  You need to set two environmental variables, PATH and USE_PGXS,
+  before running make command. And then, run `make' and `make install'
+  at the directory where you extracted xlogdump source code.
 
+    export PATH=$PATH:/usr/local/pgsql/bin
     export USE_PGXS=1
     make
     make install
-
-  Or specify `top_builddir' variable when running make:
-
-    make top_builddir=/path/to/postgresql-9.0.x
-    make top_builddir=/path/to/postgresql-9.0.x install
 
    
 Supported Version
@@ -34,6 +30,7 @@ Supported Version
 
   xlogdump is able to be compiled and work with following versions:
 
+  - PostgreSQL 9.2.x
   - PostgreSQL 9.1.x
   - PostgreSQL 9.0.x
   - PostgreSQL 8.4.x
@@ -66,6 +63,7 @@ Options:
                               13:Gin
                               14:Gist
                               15:Sequence
+                              16:SPGist
   -x, --xid=XID             Outputs only the transaction log records
                             containing the specified transaction id.
   -t, --transactions        Outputs only transaction info: the xid,
@@ -85,6 +83,7 @@ oid2name supplimental options:
   -h, --host=HOST           database server host or socket directory
   -p, --port=PORT           database server port number
   -U, --user=NAME           database user name to connect
+  -d, --dbname=NAME         database name to connect
   -f, --file=FILE           file name to read oid2name cache
 
 

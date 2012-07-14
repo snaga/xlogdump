@@ -1,7 +1,7 @@
 #!/bin/sh
 
 SOURCE_ROOT="/tmp/pgsql/source"
-VERSIONS="9.1.0 9.0.4 8.4.8 8.3.15"
+VERSIONS="9.2beta2 9.1.4 9.0.8 8.4.12 8.3.19"
 
 for v in $VERSIONS
   do pushd ${SOURCE_ROOT}/postgresql-${v};
@@ -17,9 +17,9 @@ for v in $VERSIONS
 
      popd;
 
-     make top_builddir=${SOURCE_ROOT}/postgresql-${v} clean;
-     make top_builddir=${SOURCE_ROOT}/postgresql-${v};
+     env USE_PGXS=1 PATH=/tmp/pgsql/${v}/bin:$PATH make clean;
+     env USE_PGXS=1 PATH=/tmp/pgsql/${v}/bin:$PATH make;
 
      rm -rf xlogdump-${v};
-     cp xlogdump xlogdump-${v};
+     mv xlogdump xlogdump-${v};
 done;
