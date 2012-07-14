@@ -222,7 +222,7 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 	}
 
 	/* skip total xl_tot_len check if physical log has been removed. */
-#if PG_VERSION_NUM < 80300
+#if PG_VERSION_NUM < 80300 || PG_VERSION_NUM >= 90200
 	if (record->xl_info & XLR_BKP_BLOCK_MASK)
 #else
 	if (!(record->xl_info & XLR_BKP_REMOVABLE) ||
@@ -869,13 +869,6 @@ ExceptionalCondition(char *conditionName,
 					 char *errorType,
 					 char *fileName,
 					 int lineNumber)
-#else
-int
-ExceptionalCondition(const char *conditionName,
-					 const char *errorType,
-					 const char *fileName,
-					 int lineNumber)
-#endif
 {
 	fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
 			errorType, conditionName,
@@ -884,5 +877,52 @@ ExceptionalCondition(const char *conditionName,
 	abort();
 	return 0;
 }
+#elif PG_VERSION_NUM >= 80300 && PG_VERSION_NUM < 90200
+int
+ExceptionalCondition(const char *conditionName,
+					 const char *errorType,
+					 const char *fileName,
+					 int lineNumber)
+{
+	fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
+			errorType, conditionName,
+			fileName, lineNumber);
+
+	abort();
+	return 0;
+}
+#else
+void
+ExceptionalCondition(const char *conditionName,
+		     const char *errorType,
+		     const char *fileName,
+		     int lineNumber)
+{
+	if (!PointerIsValid(conditionName)
+	    || !PointerIsValid(fileName)
+	    || !PointerIsValid(errorType))
+		fprintf(stderr, "TRAP: ExceptionalCondition: bad arguments\n");
+	else
+	{
+		fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
+			     errorType, conditionName,
+			     fileName, lineNumber);
+	}
+
+	/* Usually this shouldn't be needed, but make sure the msg went out */
+	fflush(stderr);
+
+#ifdef SLEEP_ON_ASSERT
+
+	/*
+	 * It would be nice to use pg_usleep() here, but only does 2000 sec or 33
+	 * minutes, which seems too short.
+	 */
+	sleep(1000000);
 #endif
 
+	abort();
+}
+#endif
+
+#endif /* assert_enabled */
