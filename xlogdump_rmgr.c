@@ -19,6 +19,10 @@
 #include "catalog/pg_control.h"
 #include "commands/dbcommands.h"
 
+#if PG_VERSION_NUM >=90000
+#include "utils/relmapper.h"
+#endif
+
 #include "xlogdump_oid2name.h"
 #include "xlogdump_statement.h"
 
@@ -563,8 +567,26 @@ print_rmgr_multixact(XLogRecPtr cur, XLogRecord *record, uint8 info)
 void
 print_rmgr_relmap(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
-	/* FIXME: need to be implemented. */
-	print_rmgr_record(cur, record, "relmap");
+	char buf[1024];
+
+	switch (info)
+	{
+		case XLOG_RELMAP_UPDATE:
+		{
+			xl_relmap_update *xlrec = (xl_relmap_update *)XLogRecGetData(record);
+			snprintf(buf, sizeof(buf), "update: dbid:%d, tsid:%d, nbytes:%d",
+				 xlrec->dbid,
+				 xlrec->tsid,
+				 xlrec->nbytes);
+			break;
+		}
+
+		default:
+			snprintf(buf, sizeof(buf), "unknown RELMAP operation - %d.", info);
+			break;
+	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void

@@ -6,7 +6,7 @@ VERSIONS="9.2beta2 9.1.4 9.0.8 8.4.12 8.3.19"
 for v in $VERSIONS
   do pushd ${SOURCE_ROOT}/postgresql-${v};
      if [ ! -f ${SOURCE_ROOT}/postgresql-${v}/src/backend/postgres ]; then
-       ./configure --prefix=/tmp/pgsql/${v};
+       ./configure --prefix=/tmp/pgsql/${v} --enable-debug;
        make clean;
        make;
      fi;
