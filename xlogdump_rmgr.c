@@ -17,6 +17,7 @@
 #include "access/nbtree.h"
 #include "access/xact.h"
 #include "catalog/pg_control.h"
+#include "commands/dbcommands.h"
 
 #include "xlogdump_oid2name.h"
 #include "xlogdump_statement.h"
@@ -475,8 +476,37 @@ print_rmgr_clog(XLogRecPtr cur, XLogRecord *record, uint8 info)
 void
 print_rmgr_dbase(XLogRecPtr cur, XLogRecord *record, uint8 info)
 {
+	char buf[1024];
+
 	/* FIXME: need to be implemented. */
-	print_rmgr_record(cur, record, "dbase");
+	switch (info)
+	{
+	case XLOG_DBASE_CREATE:
+	  {
+	    xl_dbase_create_rec *xlrec = (xl_dbase_create_rec *)XLogRecGetData(record);
+	    snprintf(buf, sizeof(buf), "dbase_create: db_id:%d, tablespace_id:%d, src_db_id:%d, src_tablespace_id:%d",
+		     xlrec->db_id,
+		     xlrec->tablespace_id,
+		     xlrec->src_db_id,
+		     xlrec->src_tablespace_id);
+	  }
+	  break;
+
+	case XLOG_DBASE_DROP:
+	  {
+	    xl_dbase_drop_rec *xlrec = (xl_dbase_drop_rec *)XLogRecGetData(record);
+	    snprintf(buf, sizeof(buf), "dbase_drop: db_id:%d, tablespace_id:%d",
+		     xlrec->db_id,
+		     xlrec->tablespace_id);
+	  }
+	  break;
+
+	default:
+		snprintf(buf, sizeof(buf), "unknown DBASE operation - %d.", info);
+		break;
+	}
+
+	print_rmgr_record(cur, record, buf);
 }
 
 void
