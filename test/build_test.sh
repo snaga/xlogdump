@@ -20,6 +20,16 @@ for v in $VERSIONS
      env USE_PGXS=1 PATH=/tmp/pgsql/${v}/bin:$PATH make clean;
      env USE_PGXS=1 PATH=/tmp/pgsql/${v}/bin:$PATH make;
 
+     if [ -f xlogdump ]; then
+	 success="$success $v"
+     else
+	 failed="$failed $v"
+     fi;
+
      rm -rf xlogdump-${v};
      mv xlogdump xlogdump-${v};
 done;
+
+echo "-------------------------------------------"
+echo "Success:$success";
+echo "Failed:$failed";
