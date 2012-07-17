@@ -11,13 +11,25 @@ What's `xlogdump'?
 How to install
 ==============
 
-  To build xlogdump, you don't need to have any PostgreSQL source
-  tree. You can build xlogdump with using pgxs, header files, and
-  shared libraries.
+  To build xlogdump, you don't need to have PostgreSQL source tree.
+  You can build xlogdump with using pgxs, PostgreSQL header files
+  and shared libraries.
 
-  You need to set two environmental variables, PATH and USE_PGXS,
-  before running make command. And then, run `make' and `make install'
-  at the directory where you extracted xlogdump source code.
+  If you're using PostgreSQL from some RPM packages, those additional
+  requirements are generally included in the supplemental devel package.
+  You need to install it before building xlogdump.
+
+  Also, make sure that you're going to build xlogdump against the same
+  architecture (i686 or x86_64) and the same major version of PostgreSQL.
+
+  Currently, xlogdump cannot deal with WAL files generated on the different
+  architecture. So, you need to build xlogdump on the 32-bit architecture
+  when you want to analyze WAL files generated on the 32-bit box.
+  64-bit as well.
+
+  You need to set two environmental variables, PATH and USE_PGXS.
+  And then, run `make' and `make install' at the directory where
+  you extracted xlogdump source code.
 
     export PATH=$PATH:/usr/local/pgsql/bin
     export USE_PGXS=1

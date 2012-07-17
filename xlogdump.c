@@ -346,6 +346,9 @@ restart:
 							 XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ)),
 			record->xl_tot_len,
 			curRecPtr.xlogid, curRecPtr.xrecoff);
+		printf("HINT: Make sure you're using the correct xlogdump binary built against\n"
+		       "      the same architecture and version of PostgreSQL where the WAL file\n"
+		       "      comes from.\n");
 		return false;
 	}
 	total_len = record->xl_tot_len;
