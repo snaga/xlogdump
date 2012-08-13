@@ -63,6 +63,7 @@ static char		*readRecordBuf = NULL; /* ReadRecord result area */
 static uint32		readRecordBufSize = 0;
 
 /* command-line parameters */
+static bool		check = false;	/* when true we just check segment file sanity */
 static bool		transactions = false;	/* when true we just aggregate transaction info */
 static bool		statements = false;	/* when true we try to rebuild fake sql statements with the xlog data */
 static bool		hideTimestamps = false; /* remove timestamp from dump used for testing */
@@ -92,17 +93,17 @@ transInfoPtr		transactionsInfo = NULL;
 /* prototypes */
 static void print_xlog_stats();
 
-static bool readXLogPage(void);
+static size_t readXLogPage(void);
 void exit_gracefuly(int);
 static bool RecordIsValid(XLogRecord *, XLogRecPtr);
-static bool ReadRecord(void);
+static int ReadRecord(void);
 
 static void dumpXLogRecord(XLogRecord *, bool);
 static void print_backup_blocks(XLogRecPtr, XLogRecord *);
 
 static void addTransaction(XLogRecord *);
 static void dumpTransactions();
-static void dumpXLog(char *);
+static bool dumpXLog(char *);
 static void help(void);
 
 static void
@@ -144,8 +145,11 @@ print_xlog_stats()
 	printf("\n");
 }
 
-/* Read another page, if possible */
-static bool
+/* Read another page, if possible
+ * Returns the number of bytes read
+ * Returns -1 on error.
+ **/
+static size_t
 readXLogPage(void)
 {
 	size_t nread = read(logFd, pageBuffer, XLOG_BLCKSZ);
@@ -155,8 +159,9 @@ readXLogPage(void)
 		logPageOff += XLOG_BLCKSZ;
 		if (((XLogPageHeader) pageBuffer)->xlp_magic != XLOG_PAGE_MAGIC)
 		{
-			printf("Bogus page magic number %04X at offset %X\n",
+			fprintf(stderr, "Bogus page magic number %04X at offset %X\n",
 				   ((XLogPageHeader) pageBuffer)->xlp_magic, logPageOff);
+			return -1;
 		}
 
 		/*
@@ -183,14 +188,21 @@ readXLogPage(void)
 			printf("\n");
 		}
 
-		return true;
+		return nread;
 	}
 	if (nread != 0)
 	{
-		fprintf(stderr, "Partial page of %d bytes ignored\n",
-			(int) nread);
+		if (check) {
+			fprintf(stderr, "Partial page of %d bytes found!\n",
+				(int) nread);
+			return nread;
+		}
+		else
+			fprintf(stderr, "Partial page of %d bytes ignored\n",
+				(int) nread);
 	}
-	return false;
+
+	return 0;
 }
 
 /* 
@@ -237,8 +249,8 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 		memcpy(&bkpb, blk, sizeof(BkpBlock));
 		if (bkpb.hole_offset + bkpb.hole_length > BLCKSZ)
 		{
-			printf("incorrect hole size in record at %X/%X\n",
-				   recptr.xlogid, recptr.xrecoff);
+			fprintf(stderr, "incorrect hole size in record at %X/%X\n",
+				    recptr.xlogid, recptr.xrecoff);
 			return false;
 		}
 		blen = sizeof(BkpBlock) + BLCKSZ - bkpb.hole_length;
@@ -257,7 +269,7 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 		/* Check that xl_tot_len agrees with our calculation */
 		if (blk != (char *) record + record->xl_tot_len)
 		{
-			printf("incorrect total length in record at %X/%X\n",
+			fprintf(stderr, "incorrect total length in record at %X/%X\n",
 				   recptr.xlogid, recptr.xrecoff);
 			return false;
 		}
@@ -270,8 +282,9 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 
 	if (!EQ_CRC32(record->xl_crc, crc))
 	{
-		printf("incorrect resource manager data checksum in record at %X/%X\n",
-			   recptr.xlogid, recptr.xrecoff);
+		fprintf(stderr,
+		        "incorrect resource manager data checksum in record at %X/%X\n",
+			    recptr.xlogid, recptr.xrecoff);
 		return false;
 	}
 
@@ -280,13 +293,17 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 
 /*
  * Attempt to read an XLOG record into readRecordBuf.
+ * Returns 1 on success
+ * Returns 0 when no more records available
+ * Returns -1 on error
  */
-static bool
+static int
 ReadRecord(void)
 {
 	char	   *buffer;
 	XLogRecord *record;
 	XLogContRecord *contrecord;
+	size_t		blcksz;
 	uint32		len,
 				total_len;
 	int			retries = 0;
@@ -295,20 +312,34 @@ restart:
 	while (logRecOff <= 0 || logRecOff > XLOG_BLCKSZ - SizeOfXLogRecord)
 	{
 		/* Need to advance to new page */
-		if (! readXLogPage())
-			return false;
+		blcksz = readXLogPage();
+		if (blcksz != XLOG_BLCKSZ) {
+			/* 0 bytes read, no more page to read here */
+			if (blcksz == 0) return 0;
+
+			fprintf(stderr, "Error while reading page at offset %X\n",
+				    logPageOff);
+			return -1;
+		}
+
 		logRecOff = XLogPageHeaderSize((XLogPageHeader) pageBuffer);
 		if ((((XLogPageHeader) pageBuffer)->xlp_info & ~XLP_LONG_HEADER) != 0)
 		{
-			printf("Unexpected page info flags %04X at offset %X\n",
-				   ((XLogPageHeader) pageBuffer)->xlp_info, logPageOff);
 			/* Check for a continuation record */
 			if (((XLogPageHeader) pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD)
 			{
-				printf("Skipping unexpected continuation record at offset %X\n",
-					   logPageOff);
+				if (!check)
+					fprintf(stderr,
+						    "Skipping continuation record at offset %X\n",
+						    logPageOff);
 				contrecord = (XLogContRecord *) (pageBuffer + logRecOff);
 				logRecOff += MAXALIGN(contrecord->xl_rem_len + SizeOfXLogContRecord);
+			}
+			else {
+				fprintf(stderr, "Unexpected page info flags %04X at offset %X\n",
+						((XLogPageHeader) pageBuffer)->xlp_info, logPageOff);
+
+				if (check) return -1;
 			}
 		}
 	}
@@ -323,11 +354,13 @@ restart:
 		if (record->xl_rmid == RM_XLOG_ID && record->xl_info == XLOG_SWITCH)
 		{
 			dumpXLogRecord(record, false);
-			return false;
+			return 0;
 		}
 
-		printf("ReadRecord: record with zero len at %u/%08X\n",
-		   curRecPtr.xlogid, curRecPtr.xrecoff);
+		fprintf(stderr, "ReadRecord: record with zero len at %u/%08X\n",
+		        curRecPtr.xlogid, curRecPtr.xrecoff);
+
+		if (check) return -1;
 
 		/* Attempt to recover on new page, but give up after a few... */
 		logRecOff = 0;
@@ -339,17 +372,18 @@ restart:
 		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
 		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
 	{
-		printf(
+		fprintf(stderr,
 			"invalid record length(expected %lu ~ %lu, actual %d) at %X/%X\n",
 			(unsigned long) (SizeOfXLogRecord + record->xl_len),
 			(unsigned long) (SizeOfXLogRecord + record->xl_len +
 							 XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ)),
 			record->xl_tot_len,
 			curRecPtr.xlogid, curRecPtr.xrecoff);
-		printf("HINT: Make sure you're using the correct xlogdump binary built against\n"
-		       "      the same architecture and version of PostgreSQL where the WAL file\n"
-		       "      comes from.\n");
-		return false;
+		fprintf(stderr,
+			"HINT: Make sure you're using the correct xlogdump binary built against\n"
+			"      the same architecture and version of PostgreSQL where the WAL file\n"
+			"      comes from.\n");
+		return -1;
 	}
 	total_len = record->xl_tot_len;
 
@@ -375,7 +409,7 @@ restart:
 			/* We treat this as a "bogus data" condition */
 			fprintf(stderr, "record length %u at %X/%X too long\n",
 					total_len, curRecPtr.xlogid, curRecPtr.xrecoff);
-			return false;
+			return -1;
 		}
 		readRecordBufSize = newSize;
 	}
@@ -393,28 +427,38 @@ restart:
 		for (;;)
 		{
 			uint32	pageHeaderSize;
-
-			if (! readXLogPage())
+			blcksz  = readXLogPage();
+			if (blcksz != XLOG_BLCKSZ)
 			{
+				if (check && blcksz == 0) return 0;
+
 				/* XXX ought to be able to advance to new input file! */
-				fprintf(stderr, "Unable to read continuation page?\n");
-				dumpXLogRecord(record, true);
-				return false;
+				if (!check) {
+					fprintf(stderr, "Unable to read continuation page?\n");
+					dumpXLogRecord(record, true);
+					return 0;
+				}
+
+				fprintf(stderr, "Unable to read continuation page\n");
+
+				return -1;
 			}
 			if (!(((XLogPageHeader) pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD))
 			{
-				printf("ReadRecord: there is no ContRecord flag in logfile %u seg %u off %u\n",
-					   logId, logSeg, logPageOff);
-				return false;
+				fprintf(stderr,
+					    "ReadRecord: there is no ContRecord flag in logfile %u seg %u off %u\n",
+					    logId, logSeg, logPageOff);
+				return -1;
 			}
 			pageHeaderSize = XLogPageHeaderSize((XLogPageHeader) pageBuffer);
 			contrecord = (XLogContRecord *) (pageBuffer + pageHeaderSize);
 			if (contrecord->xl_rem_len == 0 || 
 				total_len != (contrecord->xl_rem_len + gotlen))
 			{
-				printf("ReadRecord: invalid cont-record len %u in logfile %u seg %u off %u\n",
-					   contrecord->xl_rem_len, logId, logSeg, logPageOff);
-				return false;
+				fprintf(stderr,
+					    "ReadRecord: invalid cont-record len %u in logfile %u seg %u off %u\n",
+					    contrecord->xl_rem_len, logId, logSeg, logPageOff);
+				return -1;
 			}
 			len = XLOG_BLCKSZ - pageHeaderSize - SizeOfXLogContRecord;
 			if (contrecord->xl_rem_len > len)
@@ -430,16 +474,16 @@ restart:
 			break;
 		}
 		if (!RecordIsValid(record, curRecPtr))
-			return false;
-		return true;
+			return -1;
+		return 1;
 	}
 	/* Record is contained in this page */
 	memcpy(buffer, record, total_len);
 	record = (XLogRecord *) buffer;
 	logRecOff += MAXALIGN(total_len);
 	if (!RecordIsValid(record, curRecPtr))
-		return false;
-	return true;
+		return -1;
+	return 1;
 }
 
 static void
@@ -652,10 +696,11 @@ dumpTransactions()
 	printf("\n");
 }
 
-static void
+static bool
 dumpXLog(char* fname)
 {
 	char	*fnamebase;
+	int		ret = -1;
 
 	printf("\n%s:\n\n", fname);
 	/*
@@ -673,7 +718,7 @@ dumpXLog(char* fname)
 	}
 	logPageOff = -XLOG_BLCKSZ;		/* so 1st increment in readXLogPage gives 0 */
 	logRecOff = 0;
-	while (ReadRecord())
+	while ( (ret = ReadRecord()) == 1 )
 	{
 		if(!transactions)
 			dumpXLogRecord((XLogRecord *) readRecordBuf, false);
@@ -682,8 +727,13 @@ dumpXLog(char* fname)
 
 		prevRecPtr = curRecPtr;
 	}
+
+	if(ret == -1) return false;
+
 	if(transactions)
 		dumpTransactions();
+
+	return true;
 }
 
 static void
@@ -695,6 +745,9 @@ help(void)
 	printf("Usage:\n");
 	printf("  xlogdump [OPTION]... [segment file(s)]\n");
 	printf("\nOptions:\n");
+	printf("  -c, --check               Check segment file coherence. Returns:\n");
+	printf("                            0 on success\n");
+	printf("                            1 if an error is found in the file.\n");
 	printf("  -r, --rmid=RMID           Outputs only the transaction log records\n"); 
 	printf("                            containing the specified operation.\n");
 	printf("                            RMID:Resource Manager\n");
@@ -732,6 +785,7 @@ main(int argc, char** argv)
 	int	c, i, optindex;
 	bool oid2name = false;
 	bool oid2name_gen = false;
+	bool ret = false;
 	char *pghost = NULL; /* connection host */
 	char *pgport = NULL; /* connection port */
 	char *pguser = NULL; /* connection username */
@@ -739,6 +793,7 @@ main(int argc, char** argv)
 	char *oid2name_file = NULL;
 
 	static struct option long_options[] = {
+		{"check", no_argument, NULL, 'c'},
 		{"transactions", no_argument, NULL, 't'},
 		{"statements", no_argument, NULL, 's'},
 		{"stats", no_argument, NULL, 'S'},
@@ -765,11 +820,14 @@ main(int argc, char** argv)
 	dbname = strdup("postgres");
 	oid2name_file = strdup(DATADIR "/contrib/" OID2NAME_FILE);
 
-	while ((c = getopt_long(argc, argv, "sStTngr:x:h:p:U:d:f:",
+	while ((c = getopt_long(argc, argv, "csStTngr:x:h:p:U:d:f:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
+			case 'c':			/* show statements */
+				check = true;
+				break;
 			case 's':			/* show statements */
 				statements = true;
 				break;
@@ -817,6 +875,13 @@ main(int argc, char** argv)
 				fprintf(stderr, "Try \"xlogdump --help\" for more information.\n");
 				exit(1);
 		}
+	}
+
+	if (check && (statements || transactions || rmid>=0 || oid2name
+	    || hideTimestamps || enable_stats ))
+	{
+		fprintf(stderr, "options \"check\" (-c) cannot be used with other options\n");
+		exit(1);
 	}
 
 	if (statements && transactions)
@@ -869,13 +934,13 @@ main(int argc, char** argv)
 			perror(fname);
 			continue;
 		}
-		dumpXLog(fname);
+		if (! (ret = dumpXLog(fname))) break;
 	}
 
 	if (enable_stats)
 		print_xlog_stats();
 
-	exit_gracefuly(0);
+	exit_gracefuly(ret ? 0 : 1);
 	
 	/* just to avoid a warning */
 	return 0;
