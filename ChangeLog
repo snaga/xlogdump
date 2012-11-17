@@ -1,3 +1,9 @@
+2012-11-17  Satoshi Nagayasu <satoshi.nagayasu@gmail.com>
+        * Version 0.5.2
+        * Fixed Makefile and added pg_crc.c to eliminate dependencites to
+	  the core code on building xlogdump binary.
+	  (reported by Jeff Janes)
+
 2011-11-15  Satoshi Nagayasu <satoshi.nagayasu@gmail.com>
         * Version 0.5.1
         * Allows to lookup the object names for the build-in database objects
