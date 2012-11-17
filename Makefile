@@ -1,8 +1,7 @@
 PROGRAM = xlogdump
 OBJS    = strlcpy.o xlogdump.o xlogdump_rmgr.o xlogdump_statement.o xlogdump_oid2name.o
-OBJS    += pg_crc32_table.o
 
-PG_CPPFLAGS = -I$(libpq_srcdir) -DDATADIR=\"$(datadir)\"
+PG_CPPFLAGS = -I. -I$(libpq_srcdir) -DDATADIR=\"$(datadir)\"
 PG_LIBS = $(libpq_pgport)
 
 DATA = oid2name.txt

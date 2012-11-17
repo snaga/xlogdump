@@ -40,6 +40,12 @@
 #include "catalog/pg_control.h"
 #include "utils/pg_crc.h"
 
+#if PG_VERSION_NUM >= 90200
+ #include "utils/pg_crc_tables.h"
+#else
+ #include "pg_crc32_table.h"
+#endif
+
 #include "libpq-fe.h"
 #include "pg_config.h"
 #include "pqexpbuffer.h"
