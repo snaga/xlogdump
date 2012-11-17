@@ -1,8 +1,8 @@
 1663 pg_default
 1664 pg_global
 1 template1
-11866 template0
-11874 postgres
+11818 template0
+11826 postgres
 112 pg_foreign_data_wrapper_oid_index
 113 pg_foreign_server_oid_index
 174 pg_user_mapping_oid_index
