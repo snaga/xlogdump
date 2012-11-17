@@ -6,8 +6,6 @@
 #ifndef __XLOGDUMP_H__
 #define __XLOGDUMP_H__
 
-#define VERSION_STR "0.5.0"
-
 #define PRINT_XLOGRECORD_HEADER(X,Y) \
 	printf("[cur:%X/%X, xid:%d, rmid:%d(%s), len/tot_len:%d/%d, info:%d, prev:%X/%X] ", \
 	       (X).xlogid, (X).xrecoff, \
