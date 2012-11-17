@@ -1,5 +1,8 @@
 PROGRAM = xlogdump
-OBJS    = xlogdump.o xlogdump_rmgr.o xlogdump_statement.o xlogdump_oid2name.o $(top_builddir)/src/port/sprompt.o $(top_builddir)/src/backend/utils/hash/pg_crc.o
+OBJS    = xlogdump.o xlogdump_rmgr.o xlogdump_statement.o xlogdump_oid2name.o
+
+# imported from 9.1.4
+OBJS    += pg_crc.o
 
 PG_CPPFLAGS = -I$(libpq_srcdir) -DDATADIR=\"$(datadir)\"
 PG_LIBS = $(libpq_pgport)
