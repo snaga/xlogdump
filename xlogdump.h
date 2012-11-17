@@ -6,7 +6,7 @@
 #ifndef __XLOGDUMP_H__
 #define __XLOGDUMP_H__
 
-#define VERSION_STR "0.5.1"
+#define VERSION_STR "0.5.2"
 
 struct transInfo
 {
