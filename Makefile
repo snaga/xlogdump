@@ -1,7 +1,15 @@
 VERSION_STR="0.6devel"
 
+OS := $(shell uname -s)
+
 PROGRAM = xlogdump
-OBJS    = strlcpy.o xlogdump.o xlogdump_rmgr.o xlogdump_statement.o xlogdump_oid2name.o
+OBJS    = xlogdump.o xlogdump_rmgr.o xlogdump_statement.o xlogdump_oid2name.o
+
+# MacOS provides strlcpy(), no need for a private version.  At some point this
+# should be replaced with a more general test for the routine
+ifneq (Darwin,$(OS))
+OBJS += strlcpy.o
+endif
 
 PG_CPPFLAGS = -DVERSION_STR=\"$(VERSION_STR)\" -I. -I$(libpq_srcdir) -DDATADIR=\"$(datadir)\"
 PG_LIBS = $(libpq_pgport)
