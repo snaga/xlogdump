@@ -249,7 +249,7 @@ printValue(const char *tup, const int offset, const attrib_t att, const uint32 t
 			break;
 
 		case CHAROID:
-			printf("%d", *data);
+			putchar(*data);
 			new_offset += sizeof(char);
 			break;
 
