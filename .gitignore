@@ -1,0 +1,9 @@
+*.o
+/xlogdump
+/oid2name.out
+/oid2name.txt
+
+# emacs' droppings
+*~
+\#*\#
+.\#*
