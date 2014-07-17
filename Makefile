@@ -12,7 +12,7 @@ OBJS += strlcpy.o
 endif
 
 PG_CPPFLAGS = -DVERSION_STR=\"$(VERSION_STR)\" -I. -I$(libpq_srcdir) -DDATADIR=\"$(datadir)\"
-PG_LIBS = $(libpq_pgport)
+PG_LIBS = $(libpq_pgport) libxlogparse.a
 
 DATA = oid2name.txt
 EXTRA_CLEAN = oid2name.txt
@@ -35,3 +35,10 @@ xlogdump_oid2name.o: oid2name.txt
 
 oid2name.txt:
 	cp oid2name-$(majorversion).txt oid2name.txt
+
+xlogdump: all-lib
+
+clean: clean-lib
+
+all-lib clean-lib:
+	$(MAKE) -f Makefile.libxlogparse $@

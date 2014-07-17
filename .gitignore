@@ -2,6 +2,8 @@
 /xlogdump
 /oid2name.out
 /oid2name.txt
+/libxlogparse.[a,so]
+/libxlogparse.*dylib
 
 # emacs' droppings
 *~
