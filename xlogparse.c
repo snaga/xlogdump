@@ -7,6 +7,9 @@
 
 #include <unistd.h>
 #include "xlogparse.h"
+#include <access/tupmacs.h>
+#include <catalog/pg_control.h>
+#include <catalog/pg_type.h>
 #include <catalog/pg_control.h>
 
 /*
@@ -283,4 +286,150 @@ xlp_ReadRecord(int logFd, int * logRecOff, int * logPageOff,
 	if (!RecordIsValid(record, curRecPtr))
 		return XL_PARSE_FAILED;
 	return XL_PARSE_OK;
+}
+
+
+/*
+ * Decode xlog tuple data given its field type.
+ *   tup - pointer to the beginning of the entire tuple data area for the
+ *         current record
+ *   offset - offset into the data area corresponding to the current attribute
+ *   atttypid, attlen, attalign, attbyval - attribute type, length, alignment,
+ *            and "by value"
+ *   tuplen - just for error detection on variable length data, based on the
+ *            xlog record total length.
+ *   v - the decoded result.  Note that string/char data should be copied out if
+ *       intended to be used past any subsequent calls to ReadRecord().
+ */
+int
+xlp_DecodeValue(const char *tup, const unsigned int offset,
+		const Oid atttypid, const int attlen, const int attalign,
+		const char attbyval, const uint32 tuplen, union anyVal *v)
+{
+	const char *data;
+	int new_offset;
+	unsigned int i;
+
+	/*
+	 * Calculate new offset if padding exists.
+	 *
+	 * See src/backend/access/common/heaptuple.c:DataFill()
+	 * for more details on how the data is packed.
+	 */
+	if (attbyval=='t')
+	{
+		new_offset = att_align_nominal(offset, attalign);
+	}
+	else if (attlen == -1 && !VARATT_IS_1B(data) )
+	{
+		/*
+		 * If a varlena has a 4 byte offset for the info bits,
+		 * the offset needs to be re-calculated with an alignment
+		 * prior to reading the info bits itself.
+		 */
+		new_offset = att_align_nominal(offset, attalign);
+	}
+	else
+	{
+		new_offset = offset;
+	}
+	data = (char *)tup + new_offset;
+
+	// Just print out the value of a specific data type from the data array
+	switch (atttypid)
+	{
+		case INT2OID:
+			v->int16_val = *(int16 *)data;
+			new_offset += sizeof(int16);
+			break;
+
+		case INT4OID:
+		case OIDOID:
+		case REGPROCOID:
+		case XIDOID:
+			v->int32_val = *(int32 *)data;
+			new_offset += sizeof(int32);
+			break;
+
+		case INT8OID:
+			v->int64_val = *(int64 *)data;
+			new_offset += sizeof(int64);
+			break;
+
+		case FLOAT4OID:
+			v->float4_val = *(float4 *)data;
+			new_offset += sizeof(float4);
+			break;
+
+		case FLOAT8OID:
+			v->float8_val = *(float8 *)data;
+			new_offset += sizeof(float8);
+			break;
+
+		case CHAROID:
+			v->text_val.bytes = data;
+			v->text_val.len = 1;
+			new_offset += sizeof(char);
+			break;
+
+		case VARCHAROID:
+		case TEXTOID:
+		case BPCHAROID: /* blank-packed char == char(X) */
+		  {
+			int len;
+
+			len = VARSIZE_ANY(data);
+
+			if (VARATT_IS_4B(data))
+			{
+				i = 4;
+			}
+			else
+			{
+				i = 1;
+			}
+
+			if (len < 0 || tuplen < len)
+			{
+				fputs("ERROR: Invalid field len\n", stderr);
+				new_offset += tuplen;
+				break;
+			}
+
+			v->text_val.bytes = data + i;
+			v->text_val.len = len;
+
+			new_offset += len;
+			break;
+		  }
+
+		case NAMEOID:
+			v->text_val.bytes = data;
+			v->text_val.len = NAMEDATALEN;
+			new_offset += NAMEDATALEN;
+			break;
+
+		case BOOLOID:
+			v->bool_val = (*data == 0);
+			new_offset += sizeof(bool);
+			break;
+
+		case TIMESTAMPOID:
+		  {
+			v->time_val = *(Timestamp *)data;
+			new_offset += sizeof(Timestamp);
+			break;
+		  }
+
+		default:
+		  //new_offset += att_addlength_pointer(new_offset, attlen, data);
+			if (attlen > 0)
+				new_offset += attlen;
+			else
+				new_offset = -1;
+			break;
+
+	}
+
+	return new_offset;
 }
