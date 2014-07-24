@@ -49,6 +49,9 @@ xlp_DecodeValue(const char *tup, unsigned int offset,
 		Oid atttypid, int attlen, int attalign, char attbyval,
 		uint32 tuplen, union anyVal *v);
 
+extern void
+xlp_SetPageinfoDump(bool enable);
+
 
 #if defined(__cplusplus)
 }

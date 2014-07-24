@@ -376,6 +376,7 @@ dumpXLog(char* fname)
 	}
 	logPageOff = -XLOG_BLCKSZ;		/* so 1st increment in readXLogPage gives 0 */
 	logRecOff = 0;
+	xlp_SetPageinfoDump(true);
 	while (xlp_ReadRecord(logFd, &logRecOff, &logPageOff,
 			      &readRecordBuf, &readRecordBufSize, pageBuffer,
 			      &curRecPtr, logSeg) == XL_PARSE_OK)

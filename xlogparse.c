@@ -12,6 +12,12 @@
 #include <catalog/pg_type.h>
 #include <catalog/pg_control.h>
 
+
+/* Determines whether we emit informational output each time we read a new page
+ from file */
+static bool dump_pageinfo = false;
+
+
 /*
  * CRC-check an XLOG record.  We do not believe the contents of an XLOG
  * record (other than to the minimal extent of computing the amount of
@@ -88,7 +94,7 @@ RecordIsValid(const XLogRecord *record, const XLogRecPtr *recptr)
 
 /* Read another page, if possible */
 static bool
-readXLogPage(int logFd, char * pageBuffer, int * logPageOff, bool dump_pageinfo)
+readXLogPage(int logFd, char * pageBuffer, int * logPageOff)
 {
 	size_t nread = read(logFd, pageBuffer, XLOG_BLCKSZ);
 
@@ -152,7 +158,7 @@ xlp_ReadRecord(int logFd, int * logRecOff, int * logPageOff,
 	while (*logRecOff <= 0 || *logRecOff > XLOG_BLCKSZ - SizeOfXLogRecord)
 	{
 		/* Need to advance to new page */
-		if (! readXLogPage(logFd, pageBuffer, logPageOff, true))
+		if (! readXLogPage(logFd, pageBuffer, logPageOff))
 			return XL_PARSE_FAILED;
 		*logRecOff = XLogPageHeaderSize((XLogPageHeader) pageBuffer);
 		if ((((XLogPageHeader) pageBuffer)->xlp_info & ~XLP_LONG_HEADER) != 0)
@@ -241,7 +247,7 @@ xlp_ReadRecord(int logFd, int * logRecOff, int * logPageOff,
 		{
 			uint32 pageHeaderSize;
 
-			if (! readXLogPage(logFd, pageBuffer, logPageOff, true))
+			if (! readXLogPage(logFd, pageBuffer, logPageOff))
 			{
 				/* XXX ought to be able to advance to new input file! */
 				fputs("Unable to read continuation page?\n", stderr);
@@ -432,4 +438,11 @@ xlp_DecodeValue(const char *tup, const unsigned int offset,
 	}
 
 	return new_offset;
+}
+
+
+void
+xlp_SetPageinfoDump(bool enable)
+{
+	dump_pageinfo = enable;
 }
