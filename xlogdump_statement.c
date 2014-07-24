@@ -6,12 +6,9 @@
  */
 #include "xlogdump_statement.h"
 
-#include "access/tupmacs.h"
 #include "catalog/pg_type.h"
-#include "storage/bufpage.h"
 #include "utils/datetime.h"
-#include "utils/timestamp.h"
-
+#include "xlogparse.h"
 #include "xlogdump_oid2name.h"
 
 static int printValue(const char *, const int, const attrib_t, const uint32);
@@ -178,36 +175,13 @@ printUpdate(xl_heap_update *xlrecord, uint32 datalen, const char *relName)
 static int
 printValue(const char *tup, const int offset, const attrib_t att, const uint32 tuplen)
 {
-	char *data = (char *)tup + offset;
-	int16 int16_val;
-	int32 int32_val;
-	int64 int64_val;
-	float4 float4_val;
-	float8 float8_val;
-	int i;
-	int new_offset = offset;
+	unsigned int i;
+	int new_offset;
+	union anyVal v;
 
-	/*
-	 * Calculate new offset if padding exists.
-	 *
-	 * See src/backend/access/common/heaptuple.c:DataFill()
-	 * for more details on how the data is packed.
-	 */
-	if ( att.attbyval=='t' )
-	{
-		new_offset = att_align_nominal(offset, att.attalign);
-		data = (char *)tup + new_offset;
-	}
-	else if (att.attlen == -1 && !VARATT_IS_1B(data) )
-	{
-		/*
-		 * If a varlena has a 4 byte offset for the info bits,
-		 * the offset needs to be re-calculated with an alignment
-		 * prior to reading the info bits itself.
-		 */
-		new_offset = att_align_nominal(offset, att.attalign);
-		data = (char *)tup + new_offset;
-	}
+	new_offset = xlp_DecodeValue(tup, offset, att.atttypid, att.attlen,
+				     att.attalign, att.attbyval, tuplen, &v);
+
 #ifdef DEBUG
 	printf("(offset=%d, new_offset=%d) ", offset, new_offset);
 #endif
@@ -216,107 +190,50 @@ printValue(const char *tup, const int offset, const attrib_t att, const uint32 t
 	switch (att.atttypid)
 	{
 		case INT2OID:
-			memcpy(&int16_val, data, sizeof(int16));
-			printf("%d", int16_val);
-			new_offset += sizeof(int16);
+			printf("%d", v.int16_val);
 			break;
 
 		case INT4OID:
 		case OIDOID:
 		case REGPROCOID:
 		case XIDOID:
-			memcpy(&int32_val, data, sizeof(int32));
-			printf("%d", int32_val);
-			new_offset += sizeof(int32);
+			printf("%d", v.int32_val);
 			break;
 
 		case INT8OID:
-			memcpy(&int64_val, data, sizeof(int64));
-			printf(INT64_FORMAT, int64_val);
-			new_offset += sizeof(int64);
+			printf(INT64_FORMAT, v.int64_val);
 			break;
 
 		case FLOAT4OID:
-			memcpy(&float4_val, data, sizeof(float4));
-			printf("%f", float4_val);
-			new_offset += sizeof(float4);
+			printf("%f", v.float4_val);
 			break;
 
 		case FLOAT8OID:
-			memcpy(&float8_val, data, sizeof(float8));
-			printf("%f", float8_val);
-			new_offset += sizeof(float8);
+			printf("%f", v.float8_val);
 			break;
 
 		case CHAROID:
-			printf("%d", *data);
-			new_offset += sizeof(char);
+			putchar(v.text_val.bytes[0]);
 			break;
 
 		case VARCHAROID:
 		case TEXTOID:
 		case BPCHAROID: /* blank-packed char == char(X) */
-		  {
-			char *ptr;
-			int len;
-
-			i = 0;
-
-			len = VARSIZE_ANY(data);
-			ptr = VARDATA_ANY(data);
-
-#ifdef DEBUG
-			printf("(varatt_is_4b=%d, varatt_is_1b=%d, ",
-			       VARATT_IS_4B(data),
-			       VARATT_IS_1B(data));
-			printf("len=%d, tuplen=%d) ", len, tuplen);
-#endif
-
-			if ( VARATT_IS_4B(data) )
-			{
-				i += 4;
-#ifdef DEBUG
-				printf("(%02x %02x %02x %02x) ", *(data), *(data+1), *(data+2), *(data+3));
-#endif
-			}
-			else
-			{
-				i += 1;
-#ifdef DEBUG
-				printf("(%02x) ", *(data));
-#endif
-			}
-
-			if (len<0 || tuplen<len)
-			{
-				fprintf(stderr, "ERROR: Invalid field len\n");
-				new_offset += tuplen;
-				break;
-			}
-
 			printf("'");
-			for (; i<len ; i++)
-			{
-				if ( *(data+i)=='\0' )
-					break;
-				printf("%c", *(data+i));
-			}
+			for (i = 0; i < v.text_val.len && v.text_val.bytes[i] != '\0'; i++)
+				putchar(v.text_val.bytes[i]);
 			printf("'");
 
-			new_offset += len;
 			break;
-		  }
 
 		case NAMEOID:
-			for(i = 0; i < NAMEDATALEN && *(data+i) != '\0'; i++)
-				printf("%c", *(data+i));
+			for (i = 0; i < NAMEDATALEN && v.text_val.bytes[i] != '\0'; i++)
+				putchar(v.text_val.bytes[i]);
 				
-			new_offset += NAMEDATALEN;
 			break;
 
 		case BOOLOID:
-			printf("%c", (*data == 0 ? 'f' : 't'));
-			new_offset += sizeof(bool);
+			printf("%c", (v.bool_val ? 'f' : 't'));
 			break;
 
 		case TIMESTAMPOID:
@@ -325,26 +242,24 @@ printValue(const char *tup, const int offset, const attrib_t att, const uint32 t
 			int hh,mm,ss;
 			fsec_t ff;
 			Timestamp date;
-			Timestamp time;
 
-			memcpy(&time, data, sizeof(Timestamp));
 #ifdef __DEBUG
-			printf("(ts=%f) ", time);
+			printf("(ts=%f) ", v.time_val);
 #endif
 
-			TMODULO(time, date, (double) SECS_PER_DAY);
+			TMODULO(v.time_val, date, (double) SECS_PER_DAY);
 #ifdef __DEBUG
 #ifdef HAVE_INT64_TIMESTAMP
-			printf("(date=%lld, time=%lld) ", date, time);
+			printf("(date=%lld, time=%lld) ", date, v.time_val);
 #else
-			printf("(date=%f, time=%f) ", date, time);
+			printf("(date=%f, time=%f) ", date, v.time_val);
 #endif
 #endif
 
 			date += POSTGRES_EPOCH_JDATE;
 
 			j2date(date, &y, &m, &d);
-			dt2time(time, &hh, &mm, &ss, &ff);
+			dt2time(v.time_val, &hh, &mm, &ss, &ff);
 
 			printf("%04d-%02d-%02d ", y, m, d);
 #ifdef HAVE_INT64_TIMESTAMP
@@ -353,16 +268,11 @@ printValue(const char *tup, const int offset, const attrib_t att, const uint32 t
 			printf("%02d:%02d:%02.6f", hh, mm, ss+ff);
 #endif
 
-			new_offset += sizeof(Timestamp);
 			break;
 		  }
 
 		default:
 			printf("(unsupported type %d)", att.atttypid);
-			if ( att.attlen>0 )
-				new_offset += att.attlen;
-			else
-				new_offset = -1;
 		  	break;
 			
 	}
