@@ -16,7 +16,7 @@ PGXS := $(shell pg_config --pgxs)
 include $(PGXS)
 else
 subdir = contrib/xlogdump
-top_builddir = ../..
+top_builddir = postgres
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 endif

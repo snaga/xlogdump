@@ -1,0 +1,8 @@
+
+*.o
+
+oid2name.txt
+
+xlogdump
+
+postgres
