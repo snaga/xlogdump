@@ -6,3 +6,7 @@ oid2name.txt
 xlogdump
 
 postgres
+
+*.so
+
+a.out
