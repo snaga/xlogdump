@@ -70,7 +70,7 @@ void print_rmgr_standby(XLogRecPtr, XLogRecord *, uint8);
 #endif
 
 void print_rmgr_heap2(XLogRecPtr, XLogRecord *, uint8);
-void print_rmgr_heap(XLogRecPtr, XLogRecord *, uint8, bool);
+void print_rmgr_heap(XLogRecPtr, XLogRecord *, uint8);
 void print_rmgr_btree(XLogRecPtr, XLogRecord *, uint8);
 void print_rmgr_hash(XLogRecPtr, XLogRecord *, uint8);
 void print_rmgr_gin(XLogRecPtr, XLogRecord *, uint8);

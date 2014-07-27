@@ -40,11 +40,7 @@
 #include "catalog/pg_control.h"
 #include "utils/pg_crc.h"
 
-#if PG_VERSION_NUM >= 90200
- #include "utils/pg_crc_tables.h"
-#else
- #include "pg_crc32_table.h"
-#endif
+#include "pg_crc32_table.h"
 
 #include "libpq-fe.h"
 #include "pg_config.h"
@@ -53,8 +49,6 @@
 #include "strlcat.h"
 #include "xlogdump.h"
 #include "xlogdump_rmgr.h"
-#include "xlogdump_statement.h"
-#include "xlogdump_oid2name.h"
 
 static int		logFd;	       /* kernel FD for current input file */
 static TimeLineID	logTLI;	       /* current log file timeline */
@@ -71,11 +65,6 @@ static uint32		readRecordBufSize = 0;
 /* command-line parameters */
 static bool		hideTimestamps = false; /* remove timestamp from dump used for testing */
 
-/* Buffers to hold objects names */
-static char		spaceName[NAMEDATALEN] = "";
-static char		dbName[NAMEDATALEN]    = "";
-static char		relName[NAMEDATALEN]   = "";
-
 /* struct to aggregate transactions */
 transInfoPtr		transactionsInfo = NULL;
 
@@ -87,7 +76,6 @@ static bool RecordIsValid(XLogRecord *, XLogRecPtr);
 static bool ReadRecord(void);
 
 static void dumpXLogRecord(XLogRecord *, bool);
-static void print_backup_blocks(XLogRecPtr, XLogRecord *);
 
 static void dumpXLog(char *);
 static void help(void);
@@ -121,10 +109,6 @@ readXLogPage(void)
 			printf("XLP_FIRST_IS_CONTRECORD ");
 		if ((((XLogPageHeader)pageBuffer)->xlp_info & XLP_LONG_HEADER) )
 			printf("XLP_LONG_HEADER ");
-#if PG_VERSION_NUM >= 90200
-		if ((((XLogPageHeader)pageBuffer)->xlp_info & XLP_BKP_REMOVABLE) )
-			printf("XLP_BKP_REMOVABLE ");
-#endif
 		
 		printf("\n");
 
@@ -144,8 +128,6 @@ readXLogPage(void)
 void
 exit_gracefuly(int status)
 {
-	DBDisconnect();
-
 	close(logFd);
 	exit(status);
 }
@@ -192,12 +174,8 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 	}
 
 	/* skip total xl_tot_len check if physical log has been removed. */
-#if PG_VERSION_NUM < 80300 || PG_VERSION_NUM >= 90200
-	if (record->xl_info & XLR_BKP_BLOCK_MASK)
-#else
 	if (!(record->xl_info & XLR_BKP_REMOVABLE) ||
 		record->xl_info & XLR_BKP_BLOCK_MASK)
-#endif
 	{
 		/* Check that xl_tot_len agrees with our calculation */
 		if (blk != (char *) record + record->xl_tot_len)
@@ -422,95 +400,18 @@ dumpXLogRecord(XLogRecord *record, bool header_only)
 	 */
 	switch (record->xl_rmid)
 	{
-// 		case RM_XLOG_ID:
-// 			print_rmgr_xlog(curRecPtr, record, info, hideTimestamps);
-// 			break;
-// 		case RM_XACT_ID:
-// 			print_rmgr_xact(curRecPtr, record, info, hideTimestamps);
-// 			break;
-// 		case RM_SMGR_ID:
-// 			print_rmgr_smgr(curRecPtr, record, info);
-// 			break;
-// 		case RM_CLOG_ID:
-// 			print_rmgr_clog(curRecPtr, record, info);
-// 			break;
-// 		case RM_DBASE_ID:
-// 			print_rmgr_dbase(curRecPtr, record, info);
-// 			break;
-// 		case RM_TBLSPC_ID:
-// 			print_rmgr_tblspc(curRecPtr, record, info);
-// 			break;
-// 		case RM_MULTIXACT_ID:
-// 			print_rmgr_multixact(curRecPtr, record, info);
-// 			break;
-// #if PG_VERSION_NUM >= 90000
-// 		case RM_RELMAP_ID:
-// 			print_rmgr_relmap(curRecPtr, record, info);
-// 			break;
-// 		case RM_STANDBY_ID:
-// 			print_rmgr_standby(curRecPtr, record, info);
-// 			break;
-// #endif
 		case RM_HEAP2_ID:
 			print_rmgr_heap2(curRecPtr, record, info);
 			break;
 		case RM_HEAP_ID:
-			print_rmgr_heap(curRecPtr, record, info, false);
+			print_rmgr_heap(curRecPtr, record, info);
 			break;
-		// case RM_BTREE_ID:
-		// 	print_rmgr_btree(curRecPtr, record, info);
-		// 	break;
-		// case RM_HASH_ID:
-		// 	print_rmgr_hash(curRecPtr, record, info);
-		// 	break;
-		// case RM_GIN_ID:
-		// 	print_rmgr_gin(curRecPtr, record, info);
-		// 	break;
-		// case RM_GIST_ID:
-		// 	print_rmgr_gist(curRecPtr, record, info);
-		// 	break;
 		// case RM_SEQ_ID:
 		// 	print_rmgr_seq(curRecPtr, record, info);
 		// 	break;
 		// default:
 		// 	fprintf(stderr, "Unknown RMID %d.\n", record->xl_rmid);
 		// 	break;
-	}
-
-	/*
-	 * print info about backup blocks.
-	 */
-	print_backup_blocks(curRecPtr, record);
-}
-
-static void
-print_backup_blocks(XLogRecPtr cur, XLogRecord *rec)
-{
-	char *blk;
-	int i;
-	char buf[1024];
-
-	/*
-	 * backup blocks by full_page_write
-	 */
-	blk = (char*)XLogRecGetData(rec) + rec->xl_len;
-	for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
-	{
-		BkpBlock  bkb;
-
-		if (!(rec->xl_info & (XLR_SET_BKP_BLOCK(i))))
-			continue;
-		memcpy(&bkb, blk, sizeof(BkpBlock));
-		getSpaceName(bkb.node.spcNode, spaceName, sizeof(spaceName));
-		getDbName(bkb.node.dbNode, dbName, sizeof(dbName));
-		getRelName(bkb.node.relNode, relName, sizeof(relName));
-		snprintf(buf, sizeof(buf), "bkpblock[%d]: s/d/r:%s/%s/%s blk:%u hole_off/len:%u/%u\n", 
-				i+1, spaceName, dbName, relName,
-				bkb.block, bkb.hole_offset, bkb.hole_length);
-		blk += sizeof(BkpBlock) + (BLCKSZ - bkb.hole_length);
-
-		PRINT_XLOGRECORD_HEADER(cur, rec);
-		printf("%s", buf);
 	}
 }
 
@@ -624,21 +525,6 @@ main(int argc, char** argv)
 #ifndef assert_enabled
 bool		assert_enabled = true;
 
-#if PG_VERSION_NUM < 80300
-int
-ExceptionalCondition(char *conditionName,
-					 char *errorType,
-					 char *fileName,
-					 int lineNumber)
-{
-	fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
-			errorType, conditionName,
-			fileName, lineNumber);
-
-	abort();
-	return 0;
-}
-#elif PG_VERSION_NUM >= 80300 && PG_VERSION_NUM < 90200
 int
 ExceptionalCondition(const char *conditionName,
 					 const char *errorType,
@@ -652,38 +538,5 @@ ExceptionalCondition(const char *conditionName,
 	abort();
 	return 0;
 }
-#else
-void
-ExceptionalCondition(const char *conditionName,
-		     const char *errorType,
-		     const char *fileName,
-		     int lineNumber)
-{
-	if (!PointerIsValid(conditionName)
-	    || !PointerIsValid(fileName)
-	    || !PointerIsValid(errorType))
-		fprintf(stderr, "TRAP: ExceptionalCondition: bad arguments\n");
-	else
-	{
-		fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
-			     errorType, conditionName,
-			     fileName, lineNumber);
-	}
-
-	/* Usually this shouldn't be needed, but make sure the msg went out */
-	fflush(stderr);
-
-#ifdef SLEEP_ON_ASSERT
-
-	/*
-	 * It would be nice to use pg_usleep() here, but only does 2000 sec or 33
-	 * minutes, which seems too short.
-	 */
-	sleep(1000000);
-#endif
-
-	abort();
-}
-#endif
 
 #endif /* assert_enabled */

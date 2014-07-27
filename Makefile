@@ -1,7 +1,7 @@
 VERSION_STR="0.6devel"
 
 PROGRAM = xlogdump
-OBJS    = strlcpy.o xlogdump.o xlogdump_rmgr.o xlogdump_statement.o xlogdump_oid2name.o
+OBJS    = strlcpy.o xlogdump.o xlogdump_rmgr.o
 
 PG_CPPFLAGS = -DVERSION_STR=\"$(VERSION_STR)\" -I. -I$(libpq_srcdir) -DDATADIR=\"$(datadir)\"
 PG_LIBS = $(libpq_pgport)
@@ -27,3 +27,6 @@ xlogdump_oid2name.o: oid2name.txt
 
 oid2name.txt:
 	cp oid2name-$(majorversion).txt oid2name.txt
+
+xlogdump.so: $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) $(PG_LIBS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
