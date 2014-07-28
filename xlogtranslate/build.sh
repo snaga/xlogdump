@@ -1,6 +1,6 @@
 #!/bin/sh
 
 make clean-lib
-rm test-xlogtranslate
 make all-lib
-make test-xlogtranslate
+# rm test-xlogtranslate
+# make test-xlogtranslate
