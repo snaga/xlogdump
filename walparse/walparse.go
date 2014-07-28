@@ -1,4 +1,4 @@
-package wal-parse
+package walparse
 
 import "fmt"
 
