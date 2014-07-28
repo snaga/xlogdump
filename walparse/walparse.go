@@ -22,7 +22,7 @@ type WalEntry struct {
 	toOff		uint32
 }
 
-func parseWalFile(filename string, lastOffset int) ([]WalEntry) {
+func ParseWalFile(filename string, lastOffset int) ([]WalEntry) {
 	entries := make([]WalEntry, 0)
 
 	result := C.parseWalFile(C.CString(filename), C.uint32_t(lastOffset))

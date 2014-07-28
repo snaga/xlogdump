@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"xlogtranslate"
+	"github.com/bhand-mm/xlogdump/walparse"
 )
 
 func main() {
-	entries := parseWalFile("000000010000000000000001", 17812976);
+	entries := walparse.ParseWalFile("000000010000000000000001", 17812976);
 	for i := range(entries) {
 		fmt.Println(entries[i])
 	}
