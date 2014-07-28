@@ -2,7 +2,7 @@ package walparse
 
 /*
 #cgo CFLAGS: -I../xlogtranslate
-#cgo LDFLAGS: ../xlogtranslate/libxlogtranslate.a
+#cgo LDFLAGS: libxlogtranslate.a
 #include <stddef.h>
 #include "xlogtranslate.h"
 */
