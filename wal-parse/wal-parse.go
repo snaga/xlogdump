@@ -1,10 +1,10 @@
-package xlogtranslate
+package wal-parse
 
 import "fmt"
 
 /*
-#cgo CFLAGS: -I.
-#cgo LDFLAGS: ./libxlogtranslate.a
+#cgo CFLAGS: -I../xlogtranslate
+#cgo LDFLAGS: ../xlogtranslate/libxlogtranslate.a
 #include <stddef.h>
 #include "xlogtranslate.h"
 */
