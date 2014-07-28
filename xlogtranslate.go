@@ -1,4 +1,4 @@
-package main
+package xlogtranslate
 
 import "fmt"
 
@@ -6,7 +6,6 @@ import "fmt"
 #cgo CFLAGS: -I.
 #cgo LDFLAGS: ./libxlogtranslate.a
 #include <stddef.h>
-
 #include "xlogtranslate.h"
 */
 import "C"
@@ -56,14 +55,3 @@ func parseWalFile(filename string, lastOffset int) ([]WalEntry) {
 
 	return entries
 }
-
-func main() {
-	entries := parseWalFile("000000010000000000000001", 17812976);
-	for i := range(entries) {
-		fmt.Println(entries[i])
-	}
-}
-
-
-
-
