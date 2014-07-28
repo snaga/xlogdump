@@ -14,3 +14,5 @@ a.out
 *.dylib
 
 *.a
+
+test-xlogtranslate

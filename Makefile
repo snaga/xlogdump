@@ -16,5 +16,5 @@ include $(top_builddir)/src/Makefile.shlib
 
 majorversion=`echo $(VERSION) | sed -e 's/^\([0-9]*\)\.\([0-9]*\).*/\1\2/g'`
 
-test: $(shlib)
-	gcc -o test test.c libxlogtranslate.a
+test-xlogtranslate: $(shlib)
+	gcc -o test-xlogtranslate test.c libxlogtranslate.a
