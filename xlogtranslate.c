@@ -129,7 +129,7 @@ void print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, GlobalState
 	if (cur.xrecoff > state->lastOffset) {
 		result = malloc(sizeof(Result));
 
-		result->type = type;
+		result->entryType = type;
 		result->xlogid = cur.xlogid;
 		result->xrecoff = cur.xrecoff;
 		result->xid = record->xl_xid;

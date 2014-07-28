@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 typedef struct result {
-	char		type;
+	char		entryType;
 	uint32_t	xlogid;
 	uint32_t	xrecoff;
 	uint32_t	xid;

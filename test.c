@@ -11,7 +11,7 @@ int main() {
 		current = result;
 		while (current != NULL) {
 			// printf("%d %d\n", result->xlogid, result->xrecoff);
-			current = (Result *) current->next;
+			current = (Result *) result->next;
 		}
 
 		freeWalResult(result);
