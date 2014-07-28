@@ -31,53 +31,37 @@
 #include "strlcat.h"
 #include "xlogtranslate.h"
 
-PG_MODULE_MAGIC;
+typedef struct global_state {
+	int			logFd;	       /* kernel FD for current input file */
+	TimeLineID	logTLI;	       /* current log file timeline */
+	uint32		logId;	       /* current log file id */
+	uint32		logSeg;	       /* current log file segment */
+	int32		logPageOff;    /* offset of current page in file */
+	int			logRecOff;     /* offset of next record in page */
+	char		pageBuffer[XLOG_BLCKSZ];	/* current page */
+	XLogRecPtr	curRecPtr;     /* logical address of current record */
+	XLogRecPtr	prevRecPtr;    /* logical address of previous record */
+	char		*readRecordBuf; /* ReadRecord result area */
+	uint32		readRecordBufSize;
+	uint32		lastOffset;
+	Results		results;
+} GlobalState;
 
 /* prototypes */
-static bool readXLogPage(void);
-static bool RecordIsValid(XLogRecord *, XLogRecPtr);
-static bool ReadRecord(void);
-static void dumpXLogRecord(XLogRecord *, bool);
-void print_rmgr_heap(XLogRecPtr, XLogRecord *, uint8);
+static bool readXLogPage(GlobalState *);
+static bool RecordIsValid(XLogRecord *, XLogRecPtr, GlobalState *);
+static bool ReadRecord(GlobalState *);
+static void dumpXLogRecord(XLogRecord *, bool, GlobalState *);
+void print_rmgr_heap(XLogRecPtr, XLogRecord *, uint8, GlobalState *);
 
-struct transInfo
-{
-	TransactionId		xid;
-	uint32			tot_len;
-	int			status;
-	struct transInfo	*next;
-};
-
-typedef struct transInfo transInfo;
-typedef struct transInfo *transInfoPtr;
-
-static int		logFd;	       /* kernel FD for current input file */
-static TimeLineID	logTLI;	       /* current log file timeline */
-static uint32		logId;	       /* current log file id */
-static uint32		logSeg;	       /* current log file segment */
-static int32		logPageOff;    /* offset of current page in file */
-static int		logRecOff;     /* offset of next record in page */
-static char		pageBuffer[XLOG_BLCKSZ];	/* current page */
-static XLogRecPtr	curRecPtr;     /* logical address of current record */
-static XLogRecPtr	prevRecPtr;    /* logical address of previous record */
-static char		*readRecordBuf = NULL; /* ReadRecord result area */
-static uint32		readRecordBufSize = 0;
-static uint32 lastOffset = 0;
-
-/* struct to aggregate transactions */
-transInfoPtr		transactionsInfo = NULL;
-
-void
-print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info)
-{
+void print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, GlobalState *state) {
+	Result *result;
 	char type = 'x'; // I/U/D/p
 	int space = 0, db = 0, relation = 0;
 	uint32 fromBlk = 0, fromOff = 0, toBlk = 0, toOff = 0;
 
-	switch (info & XLOG_HEAP_OPMASK)
-	{
-		case XLOG_HEAP_INSERT:
-		{
+	switch (info & XLOG_HEAP_OPMASK) {
+		case XLOG_HEAP_INSERT: {
 			xl_heap_insert xlrec;
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
@@ -90,8 +74,8 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
 			break;
 		}
-		case XLOG_HEAP_DELETE:
-		{
+
+		case XLOG_HEAP_DELETE: {
 			xl_heap_delete xlrec;
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
@@ -104,9 +88,9 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
 			break;
 		}
+
 		case XLOG_HEAP_UPDATE:
-		case XLOG_HEAP_HOT_UPDATE:
-		{
+		case XLOG_HEAP_HOT_UPDATE: {
 			xl_heap_update xlrec;
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
@@ -122,8 +106,7 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			break;
 		}
 
-		case XLOG_HEAP_INPLACE:
-		{
+		case XLOG_HEAP_INPLACE: {
 			xl_heap_inplace xlrec;
 
 			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
@@ -143,18 +126,111 @@ print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info)
 			return;
 	}
 
-	if (cur.xrecoff > lastOffset) {
-		printf("%c,%u,%u,%u,%d,%d,%d,%u,%u,%u,%u\n",
-		 type, cur.xlogid, cur.xrecoff, record->xl_xid, space, db, relation, fromBlk, fromOff, toBlk, toOff);
+	if (cur.xrecoff > state->lastOffset) {
+		result = malloc(sizeof(Result));
+
+		result->type = type;
+		result->xlogid = cur.xlogid;
+		result->xrecoff = cur.xrecoff;
+		result->xid = record->xl_xid;
+		result->space = space;
+		result->db = db;
+		result->relation = relation;
+		result->fromBlk = fromBlk;
+		result->fromOff = fromOff;
+		result->toBlk = toBlk;
+		result->toOff = toOff;
+		result->next = NULL;
+
+		if (state->results.count == 0) {
+			state->results.first = result;
+			state->results.last = result;
+		} else {
+			state->results.last->next = result;
+			state->results.last = result;
+		}
+		state->results.count++;
+	}
+}
+
+static void dumpXLogRecord(XLogRecord *record, bool header_only, GlobalState *state) {
+	uint8	info = record->xl_info & ~XLR_INFO_MASK;
+
+	if (header_only) {
+		// printf(" ** maybe continues to next segment **\n");
+		return;
+	}
+
+	if (record->xl_rmid == RM_HEAP_ID) {
+		print_rmgr_heap(state->curRecPtr, record, info, state);
+	}
+}
+
+static bool readXLogPage(GlobalState *state) {
+	if (read(state->logFd, state->pageBuffer, XLOG_BLCKSZ) == XLOG_BLCKSZ) {
+		state->logPageOff += XLOG_BLCKSZ;
+		return true;
+	}
+	return false;
+}
+
+Result* parseWalFile(char* fname, uint32_t lastOffset) {
+	GlobalState state;
+	state.readRecordBuf = NULL;
+	state.lastOffset = lastOffset;
+	state.readRecordBufSize = 0;
+	state.logFd = open(fname, O_RDONLY | PG_BINARY, 0);
+	state.results.count = 0;
+
+	if (state.logFd >= 0) {
+		char	*fnamebase;
+
+		fnamebase = strrchr(fname, '/');
+
+		if (fnamebase)
+			fnamebase++;
+		else
+			fnamebase = fname;
+
+		if (sscanf(fnamebase, "%8x%8x%8x", &(state.logTLI), &(state.logId), &(state.logSeg)) != 3) {
+			state.logTLI = state.logId = state.logSeg = 0;
+		}
+
+		state.logPageOff = -XLOG_BLCKSZ;
+		state.logRecOff = 0;
+
+		while (ReadRecord(&state)) {
+			dumpXLogRecord((XLogRecord *) state.readRecordBuf, false, &state);
+
+			state.prevRecPtr = state.curRecPtr;
+		}
+
+		close(state.logFd);
+
+		if (state.readRecordBuf)
+			free(state.readRecordBuf);
+
+		return state.results.first;
+	}
+
+	return NULL;
+}
+
+void freeWalResult(Result* result) {
+	Result *current, *next;
+	current = result;
+
+	while (current != NULL) {
+		next = (Result *) current->next;
+		free(current);
+		current = next;
 	}
 }
 
 /*
  * Attempt to read an XLOG record into readRecordBuf.
  */
-static bool
-ReadRecord(void)
-{
+static bool ReadRecord(GlobalState *state) {
 	char	   *buffer;
 	XLogRecord *record;
 	XLogContRecord *contrecord;
@@ -163,37 +239,32 @@ ReadRecord(void)
 	int			retries = 0;
 
 restart:
-	while (logRecOff <= 0 || logRecOff > XLOG_BLCKSZ - SizeOfXLogRecord)
-	{
+	while (state->logRecOff <= 0 || state->logRecOff > XLOG_BLCKSZ - SizeOfXLogRecord) {
 		/* Need to advance to new page */
-		if (! readXLogPage())
+		if (! readXLogPage(state))
 			return false;
-		logRecOff = XLogPageHeaderSize((XLogPageHeader) pageBuffer);
-		if ((((XLogPageHeader) pageBuffer)->xlp_info & ~XLP_LONG_HEADER) != 0)
-		{
+		state->logRecOff = XLogPageHeaderSize((XLogPageHeader) state->pageBuffer);
+		if ((((XLogPageHeader) state->pageBuffer)->xlp_info & ~XLP_LONG_HEADER) != 0) {
 			// printf("Unexpected page info flags %04X at offset %X\n",
 			// 	   ((XLogPageHeader) pageBuffer)->xlp_info, logPageOff);
 			/* Check for a continuation record */
-			if (((XLogPageHeader) pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD)
-			{
+			if (((XLogPageHeader) state->pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD) {
 				// printf("Skipping unexpected continuation record at offset %X\n",
 				// 	   logPageOff);
-				contrecord = (XLogContRecord *) (pageBuffer + logRecOff);
-				logRecOff += MAXALIGN(contrecord->xl_rem_len + SizeOfXLogContRecord);
+				contrecord = (XLogContRecord *) (state->pageBuffer + state->logRecOff);
+				state->logRecOff += MAXALIGN(contrecord->xl_rem_len + SizeOfXLogContRecord);
 			}
 		}
 	}
 
-	curRecPtr.xlogid = logId;
-	curRecPtr.xrecoff = logSeg * XLogSegSize + logPageOff + logRecOff;
-	record = (XLogRecord *) (pageBuffer + logRecOff);
+	state->curRecPtr.xlogid = state->logId;
+	state->curRecPtr.xrecoff = state->logSeg * XLogSegSize + state->logPageOff + state->logRecOff;
+	record = (XLogRecord *) (state->pageBuffer + state->logRecOff);
 
-	if (record->xl_len == 0)
-	{
+	if (record->xl_len == 0) {
 		/* Stop if XLOG_SWITCH was found. */
-		if (record->xl_rmid == RM_XLOG_ID && record->xl_info == XLOG_SWITCH)
-		{
-			dumpXLogRecord(record, false);
+		if (record->xl_rmid == RM_XLOG_ID && record->xl_info == XLOG_SWITCH) {
+			dumpXLogRecord(record, false, state);
 			return false;
 		}
 
@@ -201,15 +272,14 @@ restart:
 		//    curRecPtr.xlogid, curRecPtr.xrecoff);
 
 		/* Attempt to recover on new page, but give up after a few... */
-		logRecOff = 0;
+		state->logRecOff = 0;
 		if (++retries > 4)
 			return false;
 		goto restart;
 	}
 	if (record->xl_tot_len < SizeOfXLogRecord + record->xl_len ||
 		record->xl_tot_len > SizeOfXLogRecord + record->xl_len +
-		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ))
-	{
+		XLR_MAX_BKP_BLOCKS * (sizeof(BkpBlock) + BLCKSZ)) {
 		// printf(
 		// 	"invalid record length(expected %lu ~ %lu, actual %d) at %X/%X\n",
 		// 	(unsigned long) (SizeOfXLogRecord + record->xl_len),
@@ -231,65 +301,56 @@ restart:
 	 * "normal" records, but very large commit or abort records might need
 	 * more space.)
 	 */
-	if (total_len > readRecordBufSize)
-	{
+	if (total_len > state->readRecordBufSize) {
 		uint32		newSize = total_len;
 
 		newSize += XLOG_BLCKSZ - (newSize % XLOG_BLCKSZ);
 		newSize = Max(newSize, 4 * XLOG_BLCKSZ);
-		if (readRecordBuf)
-			free(readRecordBuf);
-		readRecordBuf = (char *) malloc(newSize);
-		if (!readRecordBuf)
-		{
-			readRecordBufSize = 0;
+		if (state->readRecordBuf)
+			free(state->readRecordBuf);
+		state->readRecordBuf = (char *) malloc(newSize);
+		if (!state->readRecordBuf) {
+			state->readRecordBufSize = 0;
 			/* We treat this as a "bogus data" condition */
 			// fprintf(stderr, "record length %u at %X/%X too long\n",
 			// 		total_len, curRecPtr.xlogid, curRecPtr.xrecoff);
 			return false;
 		}
-		readRecordBufSize = newSize;
+		state->readRecordBufSize = newSize;
 	}
 
-	buffer = readRecordBuf;
-	len = XLOG_BLCKSZ - curRecPtr.xrecoff % XLOG_BLCKSZ; /* available in block */
-	if (total_len > len)
-	{
+	buffer = state->readRecordBuf;
+	len = XLOG_BLCKSZ - state->curRecPtr.xrecoff % XLOG_BLCKSZ; /* available in block */
+	if (total_len > len) {
 		/* Need to reassemble record */
 		uint32			gotlen = len;
 
 		memcpy(buffer, record, len);
 		record = (XLogRecord *) buffer;
 		buffer += len;
-		for (;;)
-		{
+		for (;;) {
 			uint32	pageHeaderSize;
 
-			if (! readXLogPage())
-			{
+			if (! readXLogPage(state)) {
 				/* XXX ought to be able to advance to new input file! */
 				// fprintf(stderr, "Unable to read continuation page?\n");
-				dumpXLogRecord(record, true);
+				dumpXLogRecord(record, true, state);
 				return false;
 			}
-			if (!(((XLogPageHeader) pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD))
-			{
+			if (!(((XLogPageHeader) state->pageBuffer)->xlp_info & XLP_FIRST_IS_CONTRECORD)) {
 				// printf("ReadRecord: there is no ContRecord flag in logfile %u seg %u off %u\n",
 				// 	   logId, logSeg, logPageOff);
 				return false;
 			}
-			pageHeaderSize = XLogPageHeaderSize((XLogPageHeader) pageBuffer);
-			contrecord = (XLogContRecord *) (pageBuffer + pageHeaderSize);
-			if (contrecord->xl_rem_len == 0 || 
-				total_len != (contrecord->xl_rem_len + gotlen))
-			{
+			pageHeaderSize = XLogPageHeaderSize((XLogPageHeader) state->pageBuffer);
+			contrecord = (XLogContRecord *) (state->pageBuffer + pageHeaderSize);
+			if (contrecord->xl_rem_len == 0 || total_len != (contrecord->xl_rem_len + gotlen)) {
 				// printf("ReadRecord: invalid cont-record len %u in logfile %u seg %u off %u\n",
 				// 	   contrecord->xl_rem_len, logId, logSeg, logPageOff);
 				return false;
 			}
 			len = XLOG_BLCKSZ - pageHeaderSize - SizeOfXLogContRecord;
-			if (contrecord->xl_rem_len > len)
-			{
+			if (contrecord->xl_rem_len > len) {
 				memcpy(buffer, (char *)contrecord + SizeOfXLogContRecord, len);
 				gotlen += len;
 				buffer += len;
@@ -297,67 +358,21 @@ restart:
 			}
 			memcpy(buffer, (char *) contrecord + SizeOfXLogContRecord,
 				   contrecord->xl_rem_len);
-			logRecOff = MAXALIGN(pageHeaderSize + SizeOfXLogContRecord + contrecord->xl_rem_len);
+			state->logRecOff = MAXALIGN(pageHeaderSize + SizeOfXLogContRecord + contrecord->xl_rem_len);
 			break;
 		}
-		if (!RecordIsValid(record, curRecPtr))
+		if (!RecordIsValid(record, state->curRecPtr, state))
 			return false;
 		return true;
 	}
 	/* Record is contained in this page */
 	memcpy(buffer, record, total_len);
 	record = (XLogRecord *) buffer;
-	logRecOff += MAXALIGN(total_len);
-	if (!RecordIsValid(record, curRecPtr))
+	state->logRecOff += MAXALIGN(total_len);
+	if (!RecordIsValid(record, state->curRecPtr, state))
 		return false;
 	return true;
 }
-
-static void
-dumpXLogRecord(XLogRecord *record, bool header_only)
-{
-	uint8	info = record->xl_info & ~XLR_INFO_MASK;
-
-	if (header_only)
-	{
-		// printf(" ** maybe continues to next segment **\n");
-		// return;
-	}
-
-	if (record->xl_rmid == RM_HEAP_ID) {
-		print_rmgr_heap(curRecPtr, record, info);
-	}
-}
-
-static bool readXLogPage(void) {
-	if (read(logFd, pageBuffer, XLOG_BLCKSZ) == XLOG_BLCKSZ) {
-		logPageOff += XLOG_BLCKSZ;
-		return true;
-	}
-	return false;
-}
-
-/*
- * Routines needed if headers were configured for ASSERT
- */
-#ifndef assert_enabled
-bool		assert_enabled = true;
-
-int
-ExceptionalCondition(const char *conditionName,
-					 const char *errorType,
-					 const char *fileName,
-					 int lineNumber)
-{
-	// fprintf(stderr, "TRAP: %s(\"%s\", File: \"%s\", Line: %d)\n",
-	// 		errorType, conditionName,
-	// 		fileName, lineNumber);
-
-	abort();
-	return 0;
-}
-
-#endif /* assert_enabled */
 
 /*
  * CRC-check an XLOG record.  We do not believe the contents of an XLOG
@@ -366,9 +381,7 @@ ExceptionalCondition(const char *conditionName,
  *
  * We assume all of the record has been read into memory at *record.
  */
-static bool
-RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
-{
+static bool RecordIsValid(XLogRecord *record, XLogRecPtr recptr, GlobalState *state) {
 	pg_crc32	crc;
 	int			i;
 	uint32		len = record->xl_len;
@@ -426,51 +439,4 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr)
 	}
 
 	return true;
-}
-
-void parseWAL(char* fname) {
-	logFd = open(fname, O_RDONLY | PG_BINARY, 0);
-
-	if (logFd >= 0) {
-		char	*fnamebase;
-
-		// printf("\n%s:\n\n", fname);
-
-		fnamebase = strrchr(fname, '/');
-
-		if (fnamebase) fnamebase++;
-		else fnamebase = fname;
-
-		if (sscanf(fnamebase, "%8x%8x%8x", &logTLI, &logId, &logSeg) != 3) {
-			// Can't recognize logfile name (fnamebase)
-			logTLI = logId = logSeg = 0;
-		}
-
-		logPageOff = -XLOG_BLCKSZ;		/* so 1st increment in readXLogPage gives 0 */
-		logRecOff = 0;
-
-		while (ReadRecord()) {
-			dumpXLogRecord((XLogRecord *) readRecordBuf, false);
-
-			prevRecPtr = curRecPtr;
-		}
-
-		close(logFd);
-	}
-}
-
-int
-main(int argc, char** argv)
-{
-	char *fname = argv[1];
-	if (argc > 2) {
-		lastOffset = atoi(argv[2]);
-	}
-
-	parseWAL(fname);
-
-	exit(0);
-	
-	/* just to avoid a warning */
-	return 0;
 }

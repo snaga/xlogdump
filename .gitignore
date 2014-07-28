@@ -10,3 +10,7 @@ postgres
 *.so
 
 a.out
+
+*.dylib
+
+*.a
