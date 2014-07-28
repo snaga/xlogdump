@@ -1,7 +1,5 @@
 package walparse
 
-import "fmt"
-
 /*
 #cgo CFLAGS: -I../xlogtranslate
 #cgo LDFLAGS: ../xlogtranslate/libxlogtranslate.a
