@@ -16,3 +16,11 @@ a.out
 *.a
 
 test-xlogtranslate
+
+/temp/*
+
+/xlog/*
+
+sql.sh
+
+sync.sh
