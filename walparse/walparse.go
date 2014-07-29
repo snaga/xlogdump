@@ -10,6 +10,8 @@ import "C"
 
 type WalEntry struct {
 	entryType	rune
+	rmid		uint8
+	info		uint8
 	xlogid		uint32
 	xrecoff		uint32
 	xid			uint32
@@ -32,6 +34,8 @@ func ParseWalFile(filename string, lastOffset int) ([]WalEntry) {
 	for current != nil {
 		entry := WalEntry{
 			rune(current.entryType),
+			uint8(current.rmid),
+			uint8(current.info),
 			uint32(current.xlogid),
 			uint32(current.xrecoff),
 			uint32(current.xid),
