@@ -56,7 +56,7 @@ void print_rmgr_heap(XLogRecPtr, XLogRecord *, uint8, GlobalState *);
 
 void print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, GlobalState *state) {
 	Result *result;
-	char type = 'x'; // I/U/D/p
+	char type = 'O'; // I/U/D/P/O
 	int space = 0, db = 0, relation = 0;
 	uint32 fromBlk = 0, fromOff = 0, toBlk = 0, toOff = 0;
 
@@ -121,14 +121,13 @@ void print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, GlobalState
 			toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
 			break;
 		}
-
-		default:
-			return;
 	}
 
 	if (cur.xrecoff > state->lastOffset) {
 		result = malloc(sizeof(Result));
 
+		result->rmid = record->xl_rmid;
+		result->info = info;
 		result->entryType = type;
 		result->xlogid = cur.xlogid;
 		result->xrecoff = cur.xrecoff;

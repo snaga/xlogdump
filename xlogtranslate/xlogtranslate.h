@@ -10,6 +10,8 @@
 
 typedef struct result {
 	char		entryType;
+	uint8_t		rmid;
+	uint8_t		info;
 	uint32_t	xlogid;
 	uint32_t	xrecoff;
 	uint32_t	xid;
