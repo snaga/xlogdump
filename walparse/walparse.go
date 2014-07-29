@@ -61,19 +61,19 @@ func ParseWalFile(filename string, lastOffset int) ([]WalEntry) {
 
 	for current != nil {
 		entry := WalEntry{
-			rune(current.EntryType),
-			uint8(current.RmId),
-			uint8(current.Info),
-			uint32(current.XLogId),
-			uint32(current.XRecOff),
-			uint32(current.XId),
-			int32(current.Space),
-			int32(current.DB),
-			int32(current.Relation),
-			uint32(current.FromBlk),
-			uint32(current.FromOff),
-			uint32(current.ToBlk),
-			uint32(current.ToOff),
+			rune(current.entryType),
+			uint8(current.rmid),
+			uint8(current.info),
+			uint32(current.xlogid),
+			uint32(current.xrecoff),
+			uint32(current.xid),
+			int32(current.space),
+			int32(current.db),
+			int32(current.relation),
+			uint32(current.fromBlk),
+			uint32(current.fromOff),
+			uint32(current.toBlk),
+			uint32(current.toOff),
 		}
 
 		entries = append(entries, entry)
