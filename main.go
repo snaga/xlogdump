@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"path/filepath"
 	"sort"
@@ -9,35 +10,57 @@ import (
 )
 
 /*
-path.Base(string) string
-*/
+read files sequentially
+retain backlog
+on commit clear backlog of all committed updates
+periodically drop old records based on some limit
+ */
 
-func watchDirectory(path string, quitChan chan bool) (<-chan walparse.WalEntry) {
-	notifyChan := make(chan walparse.WalEntry)
+func watchWalDirectory(path string, quitChan chan bool) (<-chan string) {
+	var highestLogId, highestRecOff uint32 = 0, 0
 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-	    log.Fatal(err)
-	}
+	// this channel is returned by this method to send updates to clients
+	commitsChan := make(chan string)
 
+	// this channel passes entries to be processed by the first go routine
+	entryChan := make(chan walparse.WalEntry)
+
+	// process entries as they come in and generate messages on the commitsChan
+	go func() {
+		for entry := range entryChan {
+			fmt.Sprintf("%v", entry)
+			commitsChan <- fmt.Sprintf("%v %v", entry.XLogId, entry.XRecOff)
+		}
+	}()
+
+	// read current files
 	files, err := filepath.Glob(path+"*")
 	if err != nil {
 	    log.Fatal(err)
 	}
 
+	// ... in order
 	sort.Sort(sort.StringSlice(files))
 
-	var entries = make([]walparse.WalEntry, 0)
-
-	for i, f := range files {
-		log.Printf("i: %v, file: %v", i, f)
-		temp := walparse.ParseWalFile(f, 0)
-		entries = append(entries, temp...)
-		log.Println(len(entries))
+	// ... and publish to entryChan
+	var publishEntries = func(filename string) {
+		entries := walparse.ParseWalFile(filename, 0)
+		for _, e := range entries {
+			if (e.XLogId > highestLogId || (e.XLogId == highestLogId && e.XRecOff > highestRecOff)) {
+				entryChan <- e
+				highestLogId, highestRecOff = e.XLogId, e.XRecOff
+			}
+		}
 	}
 
-	for i := 0; i < 100; i++ {
-		log.Println(entries[i])
+	for _, f := range files {
+		publishEntries(f)
+	}
+
+	// now begin watching for changes to files and publish to entryChan
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+	    log.Fatal(err)
 	}
 
 	go func() {
@@ -45,16 +68,10 @@ func watchDirectory(path string, quitChan chan bool) (<-chan walparse.WalEntry) 
 
 	    for {
 	        select {
-	        // case event := <-watcher.Events:
-	        	// log.Println(event)
-	            // switch {
-	            // case event.Op & fsnotify.Remove == fsnotify.Remove:
-	            // 	notifyChan <- FileNotification{FileDeleted, event.Name}
-	            // default:
-	            // 	notifyChan <- FileNotification{FileUpdated, event.Name}
-	            // }
-	        // case err := <-watcher.Errors:
-	            // log.Println("error:", err)
+	        case event := <-watcher.Events:
+	        	publishEntries(event.Name)
+	        case err := <-watcher.Errors:
+	            log.Println("error:", err)
 	        case <-quitChan:
 	        	return
 	        }
@@ -66,22 +83,17 @@ func watchDirectory(path string, quitChan chan bool) (<-chan walparse.WalEntry) 
 	    log.Fatal(err)
 	}
 
-	return notifyChan
+	return commitsChan
 }
 
 func main() {
 	quitChan := make(chan bool)
 
-	fileChan := watchDirectory("./xlog/", quitChan)
+	commitsChan := watchWalDirectory("./xlog/", quitChan)
 
-	<-fileChan
-
-	// get channel for file name
-	// on write send changed message
-	// on delete send quit message
-	// quit should trigger one final parse
-	// each 'actor' writes updates to a channel 
-	// an initial write message should be spoofed for all files currently in the directory
+	for commit := range commitsChan {
+		log.Println(commit)
+	}
 
 	<-quitChan
 }
