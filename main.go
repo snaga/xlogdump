@@ -1,44 +1,95 @@
 package main
 
 import (
-	"fmt"
 	"log"
+	"path/filepath"
+	"sort"
 	"github.com/bhand-mm/xlogdump/walparse"
 	"github.com/go-fsnotify/fsnotify"
 )
 
-func main() {
-	quitChan := make(chan bool)
+/*
+path.Base(string) string
+*/
 
-	entries := walparse.ParseWalFile("xlogtranslate/000000010000000000000001", 17812976);
-	for i := range(entries) {
-		fmt.Println(entries[i])
-	}
+func watchDirectory(path string, quitChan chan bool) (<-chan walparse.WalEntry) {
+	notifyChan := make(chan walparse.WalEntry)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 	    log.Fatal(err)
 	}
-	defer watcher.Close()
 
-	go func() {
-	    for {
-	        select {
-	        case event := <-watcher.Events:
-	            log.Println("event:", event)
-	            if event.Op&fsnotify.Write == fsnotify.Write {
-	                log.Println("modified file:", event.Name)
-	            }
-	        case err := <-watcher.Errors:
-	            log.Println("error:", err)
-	        }
-	    }
-	}()
-
-	err = watcher.Add(".")
+	files, err := filepath.Glob(path+"*")
 	if err != nil {
 	    log.Fatal(err)
 	}
 
+	sort.Sort(sort.StringSlice(files))
+
+	var entries = make([]walparse.WalEntry, 0)
+
+	for i, f := range files {
+		log.Printf("i: %v, file: %v", i, f)
+		temp := walparse.ParseWalFile(f, 0)
+		entries = append(entries, temp...)
+		log.Println(len(entries))
+	}
+
+	log.Println(entries[0])
+
+	go func() {
+		defer watcher.Close()
+
+	    for {
+	        select {
+	        // case event := <-watcher.Events:
+	        	// log.Println(event)
+	            // switch {
+	            // case event.Op & fsnotify.Remove == fsnotify.Remove:
+	            // 	notifyChan <- FileNotification{FileDeleted, event.Name}
+	            // default:
+	            // 	notifyChan <- FileNotification{FileUpdated, event.Name}
+	            // }
+	        // case err := <-watcher.Errors:
+	            // log.Println("error:", err)
+	        case <-quitChan:
+	        	return
+	        }
+	    }
+	}()
+
+	err = watcher.Add(path)
+	if err != nil {
+	    log.Fatal(err)
+	}
+
+	return notifyChan
+}
+
+func main() {
+	quitChan := make(chan bool)
+
+	fileChan := watchDirectory("./xlog/", quitChan)
+
+	<-fileChan
+
+	// get channel for file name
+	// on write send changed message
+	// on delete send quit message
+	// quit should trigger one final parse
+	// each 'actor' writes updates to a channel 
+	// an initial write message should be spoofed for all files currently in the directory
+
 	<-quitChan
 }
+
+
+
+
+
+
+
+
+
+
