@@ -36,7 +36,9 @@ func watchDirectory(path string, quitChan chan bool) (<-chan walparse.WalEntry) 
 		log.Println(len(entries))
 	}
 
-	log.Println(entries[0])
+	for i := 0; i < 100; i++ {
+		log.Println(entries[i])
+	}
 
 	go func() {
 		defer watcher.Close()

@@ -60,66 +60,69 @@ void print_rmgr_heap(XLogRecPtr cur, XLogRecord *record, uint8 info, GlobalState
 	int space = 0, db = 0, relation = 0;
 	uint32 fromBlk = 0, fromOff = 0, toBlk = 0, toOff = 0;
 
-	switch (info & XLOG_HEAP_OPMASK) {
-		case XLOG_HEAP_INSERT: {
-			xl_heap_insert xlrec;
 
-			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+	if (record->xl_rmid == RM_HEAP_ID) {
+		switch (info & XLOG_HEAP_OPMASK) {
+			case XLOG_HEAP_INSERT: {
+				xl_heap_insert xlrec;
 
-			type = 'I';
-			space = xlrec.target.node.spcNode;
-			db = xlrec.target.node.dbNode;
-			relation = xlrec.target.node.relNode;
-			toBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
-			toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
-			break;
-		}
+				memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 
-		case XLOG_HEAP_DELETE: {
-			xl_heap_delete xlrec;
+				type = 'I';
+				space = xlrec.target.node.spcNode;
+				db = xlrec.target.node.dbNode;
+				relation = xlrec.target.node.relNode;
+				toBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
+				toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
+				break;
+			}
 
-			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+			case XLOG_HEAP_DELETE: {
+				xl_heap_delete xlrec;
 
-			type = 'D';
-			space = xlrec.target.node.spcNode;
-			db = xlrec.target.node.dbNode;
-			relation = xlrec.target.node.relNode;
-			toBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
-			toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
-			break;
-		}
+				memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 
-		case XLOG_HEAP_UPDATE:
-		case XLOG_HEAP_HOT_UPDATE: {
-			xl_heap_update xlrec;
+				type = 'D';
+				space = xlrec.target.node.spcNode;
+				db = xlrec.target.node.dbNode;
+				relation = xlrec.target.node.relNode;
+				toBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
+				toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
+				break;
+			}
 
-			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+			case XLOG_HEAP_UPDATE:
+			case XLOG_HEAP_HOT_UPDATE: {
+				xl_heap_update xlrec;
 
-			type = 'U';
-			space = xlrec.target.node.spcNode;
-			db = xlrec.target.node.dbNode;
-			relation = xlrec.target.node.relNode;
-			fromBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
-			fromOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
-			toBlk = ItemPointerGetBlockNumber(&xlrec.newtid);
-			toOff = ItemPointerGetOffsetNumber(&xlrec.newtid);
-			break;
-		}
+				memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
 
-		case XLOG_HEAP_INPLACE: {
-			xl_heap_inplace xlrec;
+				type = 'U';
+				space = xlrec.target.node.spcNode;
+				db = xlrec.target.node.dbNode;
+				relation = xlrec.target.node.relNode;
+				fromBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
+				fromOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
+				toBlk = ItemPointerGetBlockNumber(&xlrec.newtid);
+				toOff = ItemPointerGetOffsetNumber(&xlrec.newtid);
+				break;
+			}
 
-			memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+			case XLOG_HEAP_INPLACE: {
+				xl_heap_inplace xlrec;
 
-			type = 'P';
-			space = xlrec.target.node.spcNode;
-			db = xlrec.target.node.dbNode;
-			relation = xlrec.target.node.relNode;
-			fromBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
-			fromOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
-			toBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
-			toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
-			break;
+				memcpy(&xlrec, XLogRecGetData(record), sizeof(xlrec));
+
+				type = 'P';
+				space = xlrec.target.node.spcNode;
+				db = xlrec.target.node.dbNode;
+				relation = xlrec.target.node.relNode;
+				fromBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
+				fromOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
+				toBlk = ItemPointerGetBlockNumber(&xlrec.target.tid);
+				toOff = ItemPointerGetOffsetNumber(&xlrec.target.tid);
+				break;
+			}
 		}
 	}
 
@@ -160,9 +163,7 @@ static void dumpXLogRecord(XLogRecord *record, bool header_only, GlobalState *st
 		return;
 	}
 
-	if (record->xl_rmid == RM_HEAP_ID) {
-		print_rmgr_heap(state->curRecPtr, record, info, state);
-	}
+	print_rmgr_heap(state->curRecPtr, record, info, state);
 }
 
 static bool readXLogPage(GlobalState *state) {
