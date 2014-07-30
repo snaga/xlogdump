@@ -1,67 +1,76 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"path/filepath"
+	"regexp"
 	"sort"
-	"github.com/bhand-mm/xlogdump/walparse"
+
 	"github.com/go-fsnotify/fsnotify"
 )
 
-/*
- fix malloc usage
- publish updates over sockets (maybe amqp)
- test using postgres user
- */
+func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
+	if (watchPath[len(watchPath) - 1] != '/') {
+		watchPath = watchPath + "/"
+	}
 
-func watchWalDirectory(path string, quitChan chan bool) (<-chan string) {
 	// this channel is returned by this method to send updates to clients
 	commitsChan := make(chan string)
 
 	// this channel passes entries to be processed by the first go routine
-	entryChan := make(chan walparse.WalEntry)
+	entryChan := make(chan WalEntry)
 
 	var publishEntries = func(filename string) {
-		entries := walparse.ParseWalFile(filename, 0)
-		for _, e := range entries {
-			entryChan <- e
+		base := filepath.Base(filename)
+		matched, _ := regexp.MatchString("[0-9A-F]{24}", base)
+		if matched {
+			entries := ParseWalFile(filename, 0)
+			for _, e := range entries {
+				entryChan <- e
+			}
 		}
 	}
 
 	// process entries as they come in and generate messages on the commitsChan
 	go func() {
-		var highestLogId, highestRecOff uint32 = 0, 0
-		var entries = make([]walparse.WalEntry, 0)
+		/*********
+		 IMPORTANT: PostgreSQL reuses log files! We must not set highest* unless XId is unseen
+		 *********/
+		var highestLogId, highestRecOff, highestXId uint32 = 0, 0, 0
+		var entries = make([]WalEntry, 0)
 
 		for entry := range entryChan {
-			if (entry.XLogId > highestLogId || (entry.XLogId == highestLogId && entry.XRecOff > highestRecOff)) {
-				highestLogId, highestRecOff = entry.XLogId, entry.XRecOff
+			if entry.XId >= highestXId && (entry.XLogId > highestLogId || (entry.XLogId == highestLogId && entry.XRecOff > highestRecOff)) {
+				highestLogId, highestRecOff, highestXId = entry.XLogId, entry.XRecOff, entry.XId
 
 				switch {
-				case entry.RmId == walparse.RM_XACT_ID && entry.Info == walparse.XLOG_XACT_COMMIT:
+				case entry.RmId == RM_XACT_ID && entry.Info == XLOG_XACT_COMMIT:
 					temp := entries
-					entries = make([]walparse.WalEntry, 0)
+					entries = make([]WalEntry, 0)
 					for _, old := range temp {
 						if old.XId == entry.XId {
-							commitsChan <- fmt.Sprintf("committed:%v-%v as part of XId:%v", old.XLogId, old.XRecOff, old.XId)
+							commitsChan <- fmt.Sprintf("committed:%X-%X as part of XId:%v", old.XLogId, old.XRecOff, old.XId)
 						} else {
 							entries = append(entries, old)
 						}
 					}
-				case entry.RmId == walparse.RM_HEAP_ID:
+				case entry.RmId == RM_HEAP_ID:
 					var heapOp = entry.Info & 0x70
 					if heapOp == 0x00 || heapOp == 0x10 || heapOp == 0x20 || heapOp == 0x40 {
 						entries = append(entries, entry)
+						fmt.Printf("queueing:%X-%X  entries len %v\n", entry.XLogId, entry.XRecOff, len(entries))
 					}
 				}
 			}
 		}
 	}()
 
+	localFilesDone := make(chan bool)
 	go func() {
 		// read current files
-		files, err := filepath.Glob(path+"*")
+		files, err := filepath.Glob(watchPath+"*")
 		if err != nil {
 		    log.Fatal(err)
 		}
@@ -73,6 +82,7 @@ func watchWalDirectory(path string, quitChan chan bool) (<-chan string) {
 		for _, f := range files {
 			publishEntries(f)
 		}
+		localFilesDone <- true
 	}()
 
 	// now begin watching for changes to files and publish to entryChan
@@ -83,6 +93,7 @@ func watchWalDirectory(path string, quitChan chan bool) (<-chan string) {
 
 	go func() {
 		defer watcher.Close()
+		<-localFilesDone
 
 	    for {
 	        select {
@@ -98,7 +109,7 @@ func watchWalDirectory(path string, quitChan chan bool) (<-chan string) {
 	    }
 	}()
 
-	err = watcher.Add(path)
+	err = watcher.Add(watchPath)
 	if err != nil {
 	    log.Fatal(err)
 	}
@@ -107,15 +118,22 @@ func watchWalDirectory(path string, quitChan chan bool) (<-chan string) {
 }
 
 func main() {
-	quitChan := make(chan bool)
+	path := flag.String("path", "", "full path to the pg_xlog directory")
+	flag.Parse()
 
-	commitsChan := watchWalDirectory("./xlog/", quitChan)
+	if *path == "" {
+		flag.PrintDefaults()
+	} else {
+		quitChan := make(chan bool)
 
-	for commit := range commitsChan {
-		fmt.Printf("%v\n", commit)
+		commitsChan := watchWalDirectory(*path, quitChan)
+
+		for commit := range commitsChan {
+			fmt.Printf("%v\n", commit)
+		}
+
+		<-quitChan
 	}
-
-	<-quitChan
 }
 
 

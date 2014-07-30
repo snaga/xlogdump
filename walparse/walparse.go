@@ -1,4 +1,4 @@
-package walparse
+package main
 
 /*
 #cgo CFLAGS: -I../xlogtranslate
@@ -8,21 +8,7 @@ package walparse
 */
 import "C"
 
-type WalEntry struct {
-	EntryType	rune
-	RmId		uint8
-	Info		uint8
-	XLogId		uint32
-	XRecOff		uint32
-	XId			uint32
-	Space		int32
-	DB			int32
-	Relation	int32
-	FromBlk		uint32
-	FromOff		uint32
-	ToBlk		uint32
-	ToOff		uint32
-}
+import "encoding/json"
 
 const (
 	RM_XLOG_ID		= 0
@@ -51,6 +37,47 @@ const (
 	XLOG_XACT_ABORT_PREPARED	= 0x40
 	XLOG_XACT_ASSIGNMENT		= 0x50
 )
+
+type WalEntry struct {
+	EntryType	rune
+	RmId		uint8
+	Info		uint8
+	XLogId		uint32
+	XRecOff		uint32
+	XId			uint32
+	Space		int32
+	DB			int32
+	Relation	int32
+	FromBlk		uint32
+	FromOff		uint32
+	ToBlk		uint32
+	ToOff		uint32
+}
+
+type Update struct {
+	logid	string	`json:"logid"`	// xlogid-xrecoff
+	xid		uint32	`json:"xid"`	// transaction id
+	spc		int32	`json:"spc"`	// tablespace
+	db		int32	`json:"db"`		// database
+	rel		int32	`json:"rel"`	// relation
+	ctid	string	`json:"ctid"`	// tuple id
+}
+
+func entryToJson(entry WalEntry) []byte {
+	update := Update{
+		logid:	fmt.Sprintf("%X-%X", entry.XLogId, entry.XRecOff)
+		xid:	entry.XId
+		spc:	entry.Space
+		db:		entry.DB
+		rel:	entry.Relation
+		ctid:	fmt.Sprintf("(%v,%v)", entry.ToBlk, entry.ToOff)
+	}
+	b, err := json.Marshal(entry)
+	if err {
+		panic(err)
+	}
+	return b
+}
 
 func ParseWalFile(filename string, lastOffset int) ([]WalEntry) {
 	entries := make([]WalEntry, 0)
