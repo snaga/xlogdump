@@ -11,6 +11,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 )
 
 const (
@@ -58,27 +59,30 @@ type WalEntry struct {
 }
 
 type Update struct {
-	logid	string	`json:"logid"`	// xlogid-xrecoff
-	xid		uint32	`json:"xid"`	// transaction id
-	spc		int32	`json:"spc"`	// tablespace
-	db		int32	`json:"db"`		// database
-	rel		int32	`json:"rel"`	// relation
-	ctid	string	`json:"ctid"`	// tuple id
+	LogId	string	`json:"logid"`	// xlogid-xrecoff
+	XId		uint32	`json:"xid"`	// transaction id
+	Spc		int32	`json:"spc"`	// tablespace
+	Db		int32	`json:"db"`		// database
+	Rel		int32	`json:"rel"`	// relation
+	Ctid	string	`json:"ctid"`	// tuple id
 }
 
 func entryToUpdate(entry WalEntry) Update {
 	return Update{
-		logid:	fmt.Sprintf("%X-%X", entry.XLogId, entry.XRecOff),
-		xid:	entry.XId,
-		spc:	entry.Space,
-		db:		entry.DB,
-		rel:	entry.Relation,
-		ctid:	fmt.Sprintf("(%v,%v)", entry.ToBlk, entry.ToOff),
+		fmt.Sprintf("%X-%X", entry.XLogId, entry.XRecOff),
+		entry.XId,
+		entry.Space,
+		entry.DB,
+		entry.Relation,
+		fmt.Sprintf("(%v,%v)", entry.ToBlk, entry.ToOff),
 	}
 }
 
 func updateToJson(update Update) []byte {
-	b, _ := json.Marshal(update)
+	b, err := json.Marshal(update)
+	if err != nil {
+		log.Println("error serializing json:", err)
+	}
 	return b
 }
 
