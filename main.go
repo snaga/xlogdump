@@ -11,13 +11,13 @@ import (
 	"github.com/go-fsnotify/fsnotify"
 )
 
-func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
+func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan Update) {
 	if (watchPath[len(watchPath) - 1] != '/') {
 		watchPath = watchPath + "/"
 	}
 
 	// this channel is returned by this method to send updates to clients
-	commitsChan := make(chan string)
+	updatesChan := make(chan Update)
 
 	// this channel passes entries to be processed by the first go routine
 	entryChan := make(chan WalEntry)
@@ -33,7 +33,7 @@ func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
 		}
 	}
 
-	// process entries as they come in and generate messages on the commitsChan
+	// process entries as they come in and generate messages on the updatesChan
 	go func() {
 		/*********
 		 IMPORTANT: PostgreSQL reuses log files! We must not set highest* unless XId is unseen
@@ -41,7 +41,8 @@ func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
 		var highestLogId, highestRecOff, highestXId uint32 = 0, 0, 0
 		var entries = make([]WalEntry, 0)
 
-		for entry := range entryChan {
+		select {
+		case entry := <- entryChan:
 			if entry.XId >= highestXId && (entry.XLogId > highestLogId || (entry.XLogId == highestLogId && entry.XRecOff > highestRecOff)) {
 				highestLogId, highestRecOff, highestXId = entry.XLogId, entry.XRecOff, entry.XId
 
@@ -51,19 +52,25 @@ func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
 					entries = make([]WalEntry, 0)
 					for _, old := range temp {
 						if old.XId == entry.XId {
-							commitsChan <- fmt.Sprintf("committed:%X-%X as part of XId:%v", old.XLogId, old.XRecOff, old.XId)
+							// publish some
+							updatesChan <- entryToUpdate(old)
 						} else {
+							// requeue others
 							entries = append(entries, old)
 						}
 					}
 				case entry.RmId == RM_HEAP_ID:
+					// heap op codes are 0x00 through 0x70
 					var heapOp = entry.Info & 0x70
+
+					// ... but we only care about these four (insert, delete, update, hot update respectively)
 					if heapOp == 0x00 || heapOp == 0x10 || heapOp == 0x20 || heapOp == 0x40 {
 						entries = append(entries, entry)
-						fmt.Printf("queueing:%X-%X  entries len %v\n", entry.XLogId, entry.XRecOff, len(entries))
 					}
 				}
 			}
+        case <-quitChan:
+        	return
 		}
 	}()
 
@@ -98,7 +105,7 @@ func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
 	    for {
 	        select {
 	        case event := <-watcher.Events:
-	        	if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
+	        	if event.Op & fsnotify.Write == fsnotify.Write || event.Op & fsnotify.Create == fsnotify.Create {
 		        	publishEntries(event.Name)
 		        }
 	        case err := <-watcher.Errors:
@@ -114,7 +121,7 @@ func watchWalDirectory(watchPath string, quitChan chan bool) (<-chan string) {
 	    log.Fatal(err)
 	}
 
-	return commitsChan
+	return updatesChan
 }
 
 func main() {
@@ -126,22 +133,13 @@ func main() {
 	} else {
 		quitChan := make(chan bool)
 
-		commitsChan := watchWalDirectory(*path, quitChan)
+		updateChan := watchWalDirectory(*path, quitChan)
 
-		for commit := range commitsChan {
-			fmt.Printf("%v\n", commit)
+		for update := range updateChan {
+			fmt.Printf("%v\n", update)
 		}
 
 		<-quitChan
 	}
 }
-
-
-
-
-
-
-
-
-
 

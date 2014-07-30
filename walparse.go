@@ -1,14 +1,17 @@
 package main
 
 /*
-#cgo CFLAGS: -I../xlogtranslate
-#cgo LDFLAGS: libxlogtranslate.a
+#cgo CFLAGS: -Ixlogtranslate
+#cgo LDFLAGS: xlogtranslate/libxlogtranslate.a
 #include <stddef.h>
 #include "xlogtranslate.h"
 */
 import "C"
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const (
 	RM_XLOG_ID		= 0
@@ -63,19 +66,19 @@ type Update struct {
 	ctid	string	`json:"ctid"`	// tuple id
 }
 
-func entryToJson(entry WalEntry) []byte {
-	update := Update{
-		logid:	fmt.Sprintf("%X-%X", entry.XLogId, entry.XRecOff)
-		xid:	entry.XId
-		spc:	entry.Space
-		db:		entry.DB
-		rel:	entry.Relation
-		ctid:	fmt.Sprintf("(%v,%v)", entry.ToBlk, entry.ToOff)
+func entryToUpdate(entry WalEntry) Update {
+	return Update{
+		logid:	fmt.Sprintf("%X-%X", entry.XLogId, entry.XRecOff),
+		xid:	entry.XId,
+		spc:	entry.Space,
+		db:		entry.DB,
+		rel:	entry.Relation,
+		ctid:	fmt.Sprintf("(%v,%v)", entry.ToBlk, entry.ToOff),
 	}
-	b, err := json.Marshal(entry)
-	if err {
-		panic(err)
-	}
+}
+
+func updateToJson(update Update) []byte {
+	b, _ := json.Marshal(update)
 	return b
 }
 
